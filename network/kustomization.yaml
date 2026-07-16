@@ -1,0 +1,12 @@
+# Network config layer: metallb pools/advertisement + DNS (pihole, k8s-gateway).
+# Apply AFTER the metallb chart from ../metallb (metallb CRDs must exist before
+# the IPAddressPool/L2Advertisement CRs here). Sequenced via Flux dependsOn +
+# healthCheck — see flux/wiring.example.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - dns-namespace.yaml
+  - helmrepositories.yaml
+  - metallb-pools.yaml
+  - dns.yaml
+  - dns-cert.yaml

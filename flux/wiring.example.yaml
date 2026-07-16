@@ -1,0 +1,61 @@
+# ---------------------------------------------------------------------------
+# EXAMPLE wiring — this file belongs in *base-stack*, not basis. It is kept here
+# for reference. Drop it into base-stack/flux-system (or order.yaml) to subscribe
+# the cluster to this repo, then comment out the duplicated metallb + DNS
+# resources in base-stack (see README.md "Cutover" section).
+#
+# It mirrors base-stack's own basis->access sequencing: install the metallb
+# chart first, then apply the pools/DNS once the metallb CRDs are Established.
+# ---------------------------------------------------------------------------
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: basis
+  namespace: flux-system
+  labels:
+    entity: cluster
+    capability: basis
+spec:
+  url: https://github.com/dylannevans/basis
+  interval: 1m
+  ref:
+    branch: main
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: basis-metallb
+  namespace: flux-system
+spec:
+  interval: 1m
+  path: ./metallb
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: basis
+  timeout: 5m
+  healthChecks:
+    - apiVersion: helm.toolkit.fluxcd.io/v2
+      kind: HelmRelease
+      name: metallb
+      namespace: flux-system
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: basis-network
+  namespace: flux-system
+spec:
+  dependsOn:
+    - name: basis-metallb
+  interval: 1m
+  path: ./network
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: basis
+  timeout: 5m
+  # metallb-pools.yaml carries a `metallb-ready` ConfigMap whose
+  # kustomize.toolkit.fluxcd.io/health annotation blocks readiness until the
+  # ipaddresspools.metallb.io CRD is Established — belt-and-suspenders with the
+  # dependsOn above.

@@ -1,0 +1,24 @@
+# DNS chart sources.
+---
+# pihole (DNS + DHCP)
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: pihole
+  namespace: flux-system
+  labels:
+    entity: cluster
+    capability: basis
+spec:
+  url: https://mojo2600.github.io/pihole-kubernetes/
+  interval: 24h
+---
+# k8s-gateway (in-cluster upstream resolver for *.famevans.win)
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: k8s-gateway
+  namespace: flux-system
+spec:
+  url: https://k8s-gateway.github.io/k8s_gateway/
+  interval: 24h

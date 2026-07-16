@@ -1,0 +1,220 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: dns
+  namespace: flux-system
+  labels:
+    app.kubernetes.io/name: pihole
+    app.kubernetes.io/part-of: dns
+    app.kubernetes.io/component: frontend
+    entity: cluster
+    env: dev
+    capability: dns
+spec:
+  interval: 12h
+  chart:
+    spec:
+      chart: pihole
+      sourceRef:
+        kind: HelmRepository
+        name: pihole
+        namespace: flux-system
+      interval: 12h
+  targetNamespace: cluster-named-dns
+  install:
+    createNamespace: true
+  values:
+    image:
+      tag: latest
+    virtualHost: dns.famevans.win
+    dnsmasq:
+      customSettings:
+        - "server=/famevans.win/10.43.171.237"
+        - "dhcp-authoritative"
+        - "domain=lan"
+        - "expand-hosts"
+        - "dhcp-range=::100,::200,constructor:eth0,ra-names,64,12h"
+        - "dhcp-option=option6:dns-server,[fdaa:1111:2222:3333::2]"
+        - "dhcp-option=option6:domain-search,lan,famevans.win"
+        - "dhcp-option=option6:23,[fdaa:1111:2222:3333::2]"
+        - "dhcp-option=option6:39"
+        - "enable-ra"
+    podDnsConfig:
+      enabled: false
+    admin:
+      enabled: true
+      adminPassword: dummy
+    extraEnvVars:
+      FTLCONF_dhcp_active: "true"
+      FTLCONF_dhcp_start: 192.168.1.100
+      FTLCONF_dhcp_end: 192.168.1.200
+      FTLCONF_dhcp_router: 192.168.1.1
+      FTLCONF_dhcp_netmask: "255.255.255.0"
+      FTLCONF_dhcp_leasetime: "24"
+      FTLCONF_dns_domain: lan
+      FTLCONF_webserver_port: 80,[::]:80
+      FTLCONF_dhcp_ipv6: "true"
+    privileged: "true"
+    serviceWeb:
+      type: ClusterIP
+      https:
+        enabled: false
+    serviceDns:
+      type: ClusterIP
+    serviceDhcp:
+      type: ClusterIP
+      enabled: true
+    persistentVolumeClaim:
+      size: 2Gi
+      storageClass: ""
+      enabled: true
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dns
+  namespace: cluster-named-dns
+  labels:
+    app.kubernetes.io/name: dns-UI
+    app.kubernetes.io/part-of: dns
+    app.kubernetes.io/component: frontend
+    entity: cluster
+    env: dev
+    capability: dns
+  annotations:
+    # Traefik specific annotations
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    # Automatic redirect from HTTP to HTTPS
+    traefik.ingress.kubernetes.io/redirect-entry-point: websecure
+    traefik.ingress.kubernetes.io/redirect-permanent: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - dns.famevans.win
+      secretName: famevans-tls
+  rules:
+    - host: dns.famevans.win
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: cluster-named-dns-dns-pihole-web
+                port:
+                  number: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dns
+  namespace: cluster-named-dns
+  labels:
+    app.kubernetes.io/name: pihole
+    app.kubernetes.io/part-of: dns
+    app.kubernetes.io/component: frontend
+    entity: cluster
+    env: dev
+    capability: dns
+  annotations:
+    metallb.universe.tf/address-pool: dns-pool
+spec:
+  type: LoadBalancer
+  ipFamilyPolicy: PreferDualStack
+  ipFamilies: [IPv4, IPv6]
+  selector:
+    app: pihole
+    release: cluster-named-dns-dns
+  ports:
+    - name: dns-tcp
+      port: 53
+      protocol: TCP
+      targetPort: dns
+    - name: dns-udp
+      port: 53
+      protocol: UDP
+      targetPort: dns-udp
+    - name: dhcp-udp
+      port: 67
+      protocol: UDP
+      targetPort: client-udp
+    - name: dhcpv6-udp
+      port: 547
+      protocol: UDP
+      targetPort: 547
+  externalTrafficPolicy: Local
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: k8s-gateway
+  namespace: flux-system
+  labels:
+    app.kubernetes.io/name: cluster-upstream
+    app.kubernetes.io/part-of: dns
+    app.kubernetes.io/component: upstream
+    entity: cluster
+    env: dev
+    capability: dns
+spec:
+  interval: 12h
+  chart:
+    spec:
+      chart: k8s-gateway
+      sourceRef:
+        kind: HelmRepository
+        name: k8s-gateway
+        namespace: flux-system
+      interval: 12h
+  targetNamespace: cluster-named-dns
+  install:
+    createNamespace: true
+  values:
+    domain: famevans.win
+    image:
+      tag: latest
+    watchedResources:
+      - Service
+      - Ingress
+    # Enable fallthrough so k8s_gateway passes unknown queries to next plugin
+    fallthrough:
+      enabled: true
+      zones:
+        - famevans.win
+    # Zone file with CNAME records for short DNS names
+    zoneFiles:
+      - filename: short-names.db
+        domains: famevans.win
+        contents: |
+          $ORIGIN famevans.win.
+          @    IN SOA cluster-named-dns-k8s-gateway.cluster-named-dns.svc.cluster.local. admin.famevans.win. (
+              2024092401 ; serial
+              3600       ; refresh
+              1800       ; retry
+              604800     ; expire
+              300        ; minimum
+          )
+
+          ; Short name CNAME records
+          mcp-k8s  IN CNAME mcp-k8s.cluster-named-svcs.famevans.win.
+          fs       IN CNAME fs.cluster-named-svcs.famevans.win.
+          #mcp-pw   IN CNAME mcp-pw.cluster-named-svcs.famevans.win.
+    extraZonePlugins:
+      - name: log
+      - name: errors
+      - name: health
+        configBlock: |-
+          lameduck 5s
+      - name: ready
+      - name: prometheus
+        parameters: 0.0.0.0:9153
+      - name: forward
+        parameters: . /etc/resolv.conf
+      - name: loop
+      - name: reload
+      - name: loadbalance
+    service:
+      type: ClusterIP
+      useTcp: true

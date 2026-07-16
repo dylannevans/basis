@@ -1,0 +1,28 @@
+# TLS cert for the pihole admin UI (dns.famevans.win), issued into the
+# cluster-named-dns namespace as the `famevans-tls` secret consumed by the
+# Ingress in dns.yaml.
+#
+# CROSS-REPO DEPENDENCY: this Certificate references the cert-manager
+# ClusterIssuer `famevans` (+ the fe-acme-cf-token Cloudflare secret), which
+# remain in base-stack (1.basis cert-manager + 3.infra/certs.yaml). basis
+# assumes cert-manager and that issuer already exist on the cluster.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: famevans-tls-dns
+  namespace: cluster-named-dns
+  labels:
+    app.kubernetes.io/name: UI-cert
+    app.kubernetes.io/part-of: fe-UI
+    app.kubernetes.io/component: cert
+    entity: cluster
+    env: dev
+    capability: dns
+spec:
+  secretName: famevans-tls
+  issuerRef:
+    name: famevans
+    kind: ClusterIssuer
+  commonName: dns.famevans.win
+  dnsNames:
+    - dns.famevans.win

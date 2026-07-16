@@ -1,0 +1,32 @@
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: metallb
+  namespace: flux-system
+  labels:
+    app.kubernetes.io/name: metallb
+    app.kubernetes.io/part-of: basis
+    app.kubernetes.io/component: loadbalancer
+    entity: cluster
+    capability: basis
+spec:
+  targetNamespace: metallb-system
+  releaseName: metallb
+  chart:
+    spec:
+      chart: metallb
+      sourceRef:
+        kind: HelmRepository
+        name: metallb
+        namespace: flux-system
+  interval: 5m
+  values:
+    prometheus:
+      serviceMonitor:
+        enabled: false
+    requests:
+      memory: "200Mi"
+      cpu: "100m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"

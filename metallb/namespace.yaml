@@ -1,0 +1,16 @@
+# MetalLB for dedicated LoadBalancer service IPs (DNS, traefik, fe-apps).
+# NOTE: this is orthogonal to the control-plane VIP. On the multi-server k3s
+# image (oci/cluster) a kube-vip DaemonSet provides the *apiserver* VIP via
+# ARP/L2. MetalLB is only for `type: LoadBalancer` *service* IPs and is still
+# required for the pihole/traefik/fe-apps addresses below.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: metallb-system
+  labels:
+    name: metallb-system
+    entity: cluster
+    capability: basis
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
