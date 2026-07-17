@@ -8,5 +8,6 @@ resources:
   - dns-namespace.yaml
   - helmrepositories.yaml
   - metallb-pools.yaml
+  - famevans-issuer.yaml
   - dns.yaml
   - dns-cert.yaml

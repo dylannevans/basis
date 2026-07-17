@@ -2,10 +2,9 @@
 # cluster-named-dns namespace as the `famevans-tls` secret consumed by the
 # Ingress in dns.yaml.
 #
-# CROSS-REPO DEPENDENCY: this Certificate references the cert-manager
-# ClusterIssuer `famevans` (+ the fe-acme-cf-token Cloudflare secret), which
-# remain in base-stack (1.basis cert-manager + 3.infra/certs.yaml). basis
-# assumes cert-manager and that issuer already exist on the cluster.
+# The `famevans` ClusterIssuer (+ fe-acme-cf-token) it references now lives in
+# basis too (famevans-issuer.yaml). basis still assumes cert-manager itself
+# (CRDs + controller) is provided by base-stack (1.basis).
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:

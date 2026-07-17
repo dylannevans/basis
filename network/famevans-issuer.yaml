@@ -1,0 +1,47 @@
+# famevans.win LAN cert issuance. Moved out of base-stack (3.infra/certs.yaml)
+# so the LAN domain's ACME issuer lives alongside the LAN DNS it certifies.
+#
+# HARD dependency (upward): cert-manager CRDs must exist first — provided by
+# base-stack (1.basis cert-manager HelmRelease). basis must reconcile after
+# that layer. No other resource depends on this being present at apply time:
+# cert-manager reconciles Certificates against the ClusterIssuer whenever it
+# appears, so ClusterIssuer<->Certificate is a soft runtime reference and the
+# base-stack/basis split is safe (e.g. cal-tls in base-stack may reference this
+# issuer across repos).
+#
+# The `simplesalt` ClusterIssuer (+ ss-acme-cf-token) is intentionally NOT moved
+# — simplesalt.company is a public domain, not LAN infra; it stays in base-stack.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: famevans
+  namespace: cert-manager
+  labels:
+    entity: fe
+    capability: certs
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: admin@famevans.win
+    privateKeySecretRef:
+      name: famevans
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: fe-acme-cf-token
+              key: api-token
+        selector:
+          dnsZones:
+            - "famevans.win"
+---
+# Cloudflare API token for famevans.win DNS-01 — value managed out-of-band via
+# kubectl (SSA merge); Flux only guarantees the placeholder exists.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: fe-acme-cf-token
+  namespace: cert-manager
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: merge
+type: Opaque

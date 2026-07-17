@@ -35,13 +35,33 @@ long-term aspiration, not the running config.
 
 ## Dependencies that remain in base-stack
 
-basis assumes these already exist on the cluster (provided by base-stack):
+basis assumes these already exist on the cluster (provided by base-stack). All
+are *soft* runtime references except cert-manager/metallb CRDs, which are the
+only *hard* (apply-order) requirement — so basis must reconcile after
+base-stack's `1.basis` layer.
 
 - **Flux controllers** (source-controller, helm-controller, kustomize-controller).
-- **cert-manager** + the `famevans` ClusterIssuer and `fe-acme-cf-token` secret
-  (`network/dns-cert.yaml` issues `famevans-tls` into `cluster-named-dns`).
+- **cert-manager** controller + CRDs. The `famevans` ClusterIssuer itself now
+  lives in basis (`network/famevans-issuer.yaml`); only the operator stays in
+  base-stack. The `simplesalt` ClusterIssuer (public domain) also stays.
 - **traefik** (k3s built-in). `network/metallb-pools.yaml` only pins traefik's
-  LB IP to the `traefik` pool via a `HelmChartConfig`.
+  LB IP to the `traefik` pool via a `HelmChartConfig`; `network/dns.yaml` also
+  hardcodes traefik's clusterIP (`10.43.171.237`) as the pihole upstream for
+  `*.famevans.win` — fragile, worth converting to a DNS name later.
+
+## Cross-repo consumers left in base-stack
+
+These base-stack resources reference basis-owned objects by name/annotation
+(soft; they just need basis reconciled):
+
+- `3.infra/local-fs.yaml` — the `fs` SMB LoadBalancer consumes the basis
+  `fe-apps` pool (stays `Pending` if basis isn't applied).
+- `4.ss/cal.yaml` (`cal-tls`) — references the basis `famevans` ClusterIssuer.
+  **cal.com's canonical URL IS `cal.famevans.win`** (hardcoded WEBAPP_URL +
+  auth callback) and it is NOT published via CF tunnel, so its famevans ingress
+  is load-bearing — do not treat it as disposable.
+- `3.infra/mcp-k8s.yaml` (`famevans-tls-svcs`) — same issuer ref; this one *is*
+  LAN-only/disposable (not in any CF tunnel).
 
 ## Cutover (test plan)
 
@@ -58,10 +78,16 @@ basis assumes these already exist on the cluster (provided by base-stack):
    - `2.access/metallb-pools.yaml` — the whole file (pools, L2Advertisement,
      traefik HelmChartConfig).
    - `3.infra/dns.yaml` — the whole file (pihole + k8s-gateway).
-   - `3.infra/certs.yaml` — the `famevans-tls-dns` Certificate.
+   - `3.infra/certs.yaml` — the `famevans` ClusterIssuer, the `fe-acme-cf-token`
+     Secret, and the `famevans-tls-dns` Certificate. Keep the `simplesalt`
+     ClusterIssuer + `ss-acme-cf-token`. `famevans-tls-svcs` (mcp-k8s) can be
+     dropped or left referencing the now-basis issuer.
    - Drop the `metallb` HelmRelease healthCheck on the `access` Kustomization
      in `order.yaml` (metallb readiness is now gated by `basis-metallb`).
-4. Reconcile and confirm the pihole/traefik/fe-apps service IPs and
+4. Do NOT drop `4.ss/cal.yaml`'s `cal.famevans.win` ingress/cert as part of this
+   — cal.com has no CF route and that host is its live URL. Re-publish cal via
+   CF (and update its WEBAPP_URL) as separate work if you want it off famevans.
+5. Reconcile and confirm the pihole/traefik/fe-apps service IPs and
    `dns.famevans.win` still resolve/serve.
 
 > Objects are moved between Flux Kustomizations, not deleted — comment out the
