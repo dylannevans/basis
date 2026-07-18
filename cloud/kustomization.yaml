@@ -1,0 +1,7 @@
+# Personal (famevans / evans-home) Cloudflare Zero Trust identity, moved out of
+# base-stack. Applied by the basis-cloud Kustomization, which depends on
+# base-stack's `access` layer for the crossplane Cloudflare zero-trust provider.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - cf-access-famevans.yaml

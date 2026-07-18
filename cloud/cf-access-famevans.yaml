@@ -1,0 +1,97 @@
+# Cloudflare Zero Trust — the famevans (personal / evans-home) Access identity,
+# moved out of simplesalt/base-stack (2.access/cf-zero-trust-*). These are
+# crossplane-managed Cloudflare resources.
+#
+# CROSS-REPO DEPENDENCY: needs the crossplane Cloudflare zero-trust provider
+# (zero.upjet-cloudflare.upbound.io) + ProviderConfig `default`, both installed
+# by base-stack. So basis-cloud must reconcile after base-stack's `access` layer
+# (wired via dependsOn in base-stack order.yaml). basis does NOT install the
+# provider.
+#
+# What stays in base-stack: the SS SSO IdP (@simplesalt.company) and the App
+# Launcher — those are simplesalt, not famevans.
+---
+# Warp Login App — personal WARP VPN, gated by the famevans Google IdP.
+# LIVE + adopted (crossplane.io/external-name = the existing CF app UUID), so:
+#   * external-name keeps this pointing at the real CF app (no re-create).
+#   * deletionPolicy: Orphan means if this MR is ever pruned, crossplane detaches
+#     but does NOT delete the CF-side app. Added because moving a live MR between
+#     Flux Kustomizations risks a destructive prune — see base-stack order.yaml
+#     handoff note (subscribe basis first so basis-cloud adopts/relabels this MR
+#     before base-stack's `access` prune runs).
+apiVersion: zero.upjet-cloudflare.upbound.io/v1alpha1
+kind: TrustAccessApplication
+metadata:
+  annotations:
+    crossplane.io/external-name: cd1dd3f6-6bfb-44cd-91c8-2a751fae13e3
+  name: cloudflare-app-warp-login
+  labels:
+    entity: fe
+    capability: access
+spec:
+  deletionPolicy: Orphan
+  forProvider:
+    accountId: ed503c805407090970caf579da8193a8
+    name: Warp Login App
+    type: warp
+    domain: evans-home.cloudflareaccess.com/warp
+    sessionDuration: 24h
+    autoRedirectToIdentity: true
+    allowedIdps:
+      - 2aa0fe06-a4df-470d-97ae-09dd4dbc036e  # famevans IdP
+    policies:
+      - id: 3658e5f4-2432-4a33-bd2b-7bdd15d175ee
+        precedence: 1
+  providerConfigRef:
+    name: default
+---
+# famevans IdP — Google OAuth for personal @gmail accounts (used by the Warp app
+# above). STILL QUARANTINED: its config/scimConfig schema targets a newer
+# cloudflare-zero provider than the installed v0.2.6 (strict-decode failure), so
+# it has never applied — the Warp app references it by UUID (adopted in CF), which
+# works without this MR. Uncomment (here + the secret below) once the provider is
+# bumped to a matching version. Kept quarantined to mirror base-stack's posture.
+# apiVersion: zero.upjet-cloudflare.upbound.io/v1alpha1
+# kind: TrustAccessIdentityProvider
+# metadata:
+#   name: cloudflare-idp-famevans
+#   labels:
+#     entity: fe
+#     capability: access
+# spec:
+#   forProvider:
+#     accountId: ed503c805407090970caf579da8193a8
+#     name: famevans
+#     type: google
+#     config:
+#       clientId: "719237469013-el73hr77eccnn21ocrmf61aa77tn6ebc.apps.googleusercontent.com"
+#       clientSecretSecretRef:
+#         name: cloudflare-idp-famevans-secret
+#         namespace: crossplane-system
+#         key: client_secret
+#       pkceEnabled: true
+#     scimConfig:
+#       enabled: false
+#       userDeprovision: false
+#       seatDeprovision: false
+#       identityUpdateBehavior: "no_action"
+#   providerConfigRef:
+#     kind: ProviderConfig
+#     name: default
+# ---
+# # Client secret placeholder for the famevans IdP — populate out-of-band:
+# #   kubectl create secret generic cloudflare-idp-famevans-secret \
+# #     -n crossplane-system --from-literal=client_secret=YOUR_SECRET
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: cloudflare-idp-famevans-secret
+#   namespace: crossplane-system
+#   labels:
+#     entity: fe
+#     capability: access
+#   annotations:
+#     kustomize.toolkit.fluxcd.io/ssa: merge
+# type: Opaque
+# stringData:
+#   client_secret: ""
