@@ -4,12 +4,29 @@ Infrastructure for a healthy LAN, subscribed via Flux GitOps. Extracted from
 `simplesalt/base-stack` so LAN-level networking (MetalLB LoadBalancer IPs +
 DNS/DHCP) lives in one place.
 
+## Cluster-independence
+
+`network/` has no hardcoded FQDNs — every hostname is `${DOMAIN}`, substituted
+at reconcile time via Flux `postBuild.substituteFrom` (wired in
+`flux/wiring.example.yaml`) against the `basis-vars` ConfigMap
+(`network/vars.yaml`). The committed default is `DOMAIN: famevans.win`; point
+basis at a different LAN by overriding that ConfigMap's value in the
+consuming repo (e.g. a Kustomize patch layered after `network/`), no edits to
+basis itself required.
+
+`cloud/cf-access-famevans.yaml` still hardcodes the Cloudflare Zero Trust team
+domain (`evans-home.cloudflareaccess.com`) — it's not wired to a Flux
+Kustomization yet (no `basis-cloud` stanza in `wiring.example.yaml`), so it
+wasn't templated here to avoid shipping an unsubstituted `${VAR}` into a live,
+orphan-protected crossplane resource.
+
 ## What's here
 
 | Path | Contents |
 |---|---|
 | `metallb/` | MetalLB install: `metallb-system` namespace, HelmRepository, HelmRelease. |
-| `network/` | MetalLB address pools + L2 (ARP) advertisement, the traefik VIP pin, and DNS: pihole (DNS+DHCP) + k8s-gateway (in-cluster upstream) + the `dns.famevans.win` Ingress/cert. |
+| `network/` | MetalLB address pools + L2 (ARP) advertisement, the traefik VIP pin, and DNS: pihole (DNS+DHCP) + k8s-gateway (in-cluster upstream) + the `dns.${DOMAIN}` Ingress/cert. |
+| `network/vars.yaml` | `basis-vars` ConfigMap — the single `DOMAIN` value (default `famevans.win`) substituted into every `${DOMAIN}` in `network/`. Override it to point basis at a different LAN. |
 | `flux/wiring.example.yaml` | Reference GitRepository + Kustomizations to add to **base-stack** to subscribe to this repo. |
 
 ## MetalLB vs kube-vip — they are NOT the same VIP
@@ -47,7 +64,7 @@ base-stack's `1.basis` layer.
 - **traefik** (k3s built-in). `network/metallb-pools.yaml` only pins traefik's
   LB IP to the `traefik` pool via a `HelmChartConfig`; `network/dns.yaml` also
   hardcodes traefik's clusterIP (`10.43.171.237`) as the pihole upstream for
-  `*.famevans.win` — fragile, worth converting to a DNS name later.
+  `*.${DOMAIN}` — fragile, worth converting to a DNS name later.
 
 ## Cross-repo consumers left in base-stack
 
@@ -88,7 +105,7 @@ These base-stack resources reference basis-owned objects by name/annotation
    — cal.com has no CF route and that host is its live URL. Re-publish cal via
    CF (and update its WEBAPP_URL) as separate work if you want it off famevans.
 5. Reconcile and confirm the pihole/traefik/fe-apps service IPs and
-   `dns.famevans.win` still resolve/serve.
+   `dns.${DOMAIN}` (default `dns.famevans.win`) still resolve/serve.
 
 > Objects are moved between Flux Kustomizations, not deleted — comment out the
 > base-stack copy in the **same commit** that adds the basis subscription so

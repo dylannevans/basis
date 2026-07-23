@@ -59,3 +59,11 @@ spec:
   # kustomize.toolkit.fluxcd.io/health annotation blocks readiness until the
   # ipaddresspools.metallb.io CRD is Established — belt-and-suspenders with the
   # dependsOn above.
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: basis-vars
+        # basis ships network/vars.yaml with DOMAIN: famevans.win as the
+        # committed default. To point basis at a different LAN, override it —
+        # e.g. a Kustomize patch on vars.yaml in the consuming repo, or a
+        # ConfigMap generator layered after this Kustomization's path.

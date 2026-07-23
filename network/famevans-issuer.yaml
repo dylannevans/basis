@@ -1,4 +1,4 @@
-# famevans.win LAN cert issuance. Moved out of base-stack (3.infra/certs.yaml)
+# ${DOMAIN} LAN cert issuance. Moved out of base-stack (3.infra/certs.yaml)
 # so the LAN domain's ACME issuer lives alongside the LAN DNS it certifies.
 #
 # HARD dependency (upward): cert-manager CRDs must exist first — provided by
@@ -22,7 +22,7 @@ metadata:
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
-    email: admin@famevans.win
+    email: admin@${DOMAIN}
     privateKeySecretRef:
       name: famevans
     solvers:
@@ -33,9 +33,9 @@ spec:
               key: api-token
         selector:
           dnsZones:
-            - "famevans.win"
+            - "${DOMAIN}"
 ---
-# Cloudflare API token for famevans.win DNS-01 — value managed out-of-band via
+# Cloudflare API token for ${DOMAIN} DNS-01 — value managed out-of-band via
 # kubectl (SSA merge); Flux only guarantees the placeholder exists.
 apiVersion: v1
 kind: Secret

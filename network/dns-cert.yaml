@@ -1,4 +1,4 @@
-# TLS cert for the pihole admin UI (dns.famevans.win), issued into the
+# TLS cert for the pihole admin UI (dns.${DOMAIN}), issued into the
 # cluster-named-dns namespace as the `famevans-tls` secret consumed by the
 # Ingress in dns.yaml.
 #
@@ -22,6 +22,6 @@ spec:
   issuerRef:
     name: famevans
     kind: ClusterIssuer
-  commonName: dns.famevans.win
+  commonName: dns.${DOMAIN}
   dnsNames:
-    - dns.famevans.win
+    - dns.${DOMAIN}

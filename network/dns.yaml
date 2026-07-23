@@ -26,16 +26,16 @@ spec:
   values:
     image:
       tag: latest
-    virtualHost: dns.famevans.win
+    virtualHost: dns.${DOMAIN}
     dnsmasq:
       customSettings:
-        - "server=/famevans.win/10.43.171.237"
+        - "server=/${DOMAIN}/10.43.171.237"
         - "dhcp-authoritative"
         - "domain=lan"
         - "expand-hosts"
         - "dhcp-range=::100,::200,constructor:eth0,ra-names,64,12h"
         - "dhcp-option=option6:dns-server,[fdaa:1111:2222:3333::2]"
-        - "dhcp-option=option6:domain-search,lan,famevans.win"
+        - "dhcp-option=option6:domain-search,lan,${DOMAIN}"
         - "dhcp-option=option6:23,[fdaa:1111:2222:3333::2]"
         - "dhcp-option=option6:39"
         - "enable-ra"
@@ -92,10 +92,10 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - dns.famevans.win
+        - dns.${DOMAIN}
       secretName: famevans-tls
   rules:
-    - host: dns.famevans.win
+    - host: dns.${DOMAIN}
       http:
         paths:
           - path: /
@@ -172,7 +172,7 @@ spec:
   install:
     createNamespace: true
   values:
-    domain: famevans.win
+    domain: ${DOMAIN}
     image:
       tag: latest
     watchedResources:
@@ -182,14 +182,14 @@ spec:
     fallthrough:
       enabled: true
       zones:
-        - famevans.win
+        - ${DOMAIN}
     # Zone file with CNAME records for short DNS names
     zoneFiles:
       - filename: short-names.db
-        domains: famevans.win
+        domains: ${DOMAIN}
         contents: |
-          $ORIGIN famevans.win.
-          @    IN SOA cluster-named-dns-k8s-gateway.cluster-named-dns.svc.cluster.local. admin.famevans.win. (
+          $ORIGIN ${DOMAIN}.
+          @    IN SOA cluster-named-dns-k8s-gateway.cluster-named-dns.svc.cluster.local. admin.${DOMAIN}. (
               2024092401 ; serial
               3600       ; refresh
               1800       ; retry
@@ -198,9 +198,9 @@ spec:
           )
 
           ; Short name CNAME records
-          mcp-k8s  IN CNAME mcp-k8s.cluster-named-svcs.famevans.win.
-          fs       IN CNAME fs.cluster-named-svcs.famevans.win.
-          #mcp-pw   IN CNAME mcp-pw.cluster-named-svcs.famevans.win.
+          mcp-k8s  IN CNAME mcp-k8s.cluster-named-svcs.${DOMAIN}.
+          fs       IN CNAME fs.cluster-named-svcs.${DOMAIN}.
+          #mcp-pw   IN CNAME mcp-pw.cluster-named-svcs.${DOMAIN}.
     extraZonePlugins:
       - name: log
       - name: errors

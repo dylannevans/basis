@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: basis-vars
+  namespace: flux-system
+  labels:
+    entity: cluster
+    capability: dns
+data:
+  DOMAIN: famevans.win

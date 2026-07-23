@@ -13,7 +13,7 @@ spec:
   url: https://mojo2600.github.io/pihole-kubernetes/
   interval: 24h
 ---
-# k8s-gateway (in-cluster upstream resolver for *.famevans.win)
+# k8s-gateway (in-cluster upstream resolver for *.${DOMAIN})
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
 metadata:
