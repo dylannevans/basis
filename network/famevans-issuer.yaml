@@ -19,6 +19,12 @@ metadata:
   labels:
     entity: fe
     capability: certs
+  annotations:
+    # Bumped 2026-07-23 to force Flux to re-apply this object (and cert-manager
+    # to re-reconcile it) after fe-acme-cf-token was populated out-of-band —
+    # cert-manager's Ready status was stuck on the pre-population error and
+    # doesn't appear to re-check on its own secret-watch resync.
+    basis.dylannevans/reconcile-nudge: "fe-acme-cf-token-populated"
 spec:
   acme:
     server: https://acme-v02.api.letsencrypt.org/directory
