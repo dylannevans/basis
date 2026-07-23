@@ -1,6 +1,7 @@
 # TLS cert for the pihole admin UI (dns.${DOMAIN}), issued into the
-# cluster-named-dns namespace as the `famevans-tls` secret consumed by the
-# Ingress in dns.yaml.
+# cluster-named-dns namespace as the `famevans-tls` secret. pihole mounts this
+# secret directly and terminates TLS itself (see network/dns.yaml) — there is
+# no ingress controller in front of it.
 #
 # The `famevans` ClusterIssuer (+ fe-acme-cf-token) it references now lives in
 # basis too (famevans-issuer.yaml). basis still assumes cert-manager itself

@@ -10,6 +10,15 @@
 # CONTROL-PLANE VIP. The pools below are SERVICE LoadBalancer IPs — a distinct
 # concern kube-vip does not cover in that configuration. Do not remove metallb
 # on the assumption kube-vip replaces it.
+#
+# NOTE ON traefik: there is deliberately no `traefik` pool/HelmChartConfig here
+# anymore. Traefik (k3s built-in, lives in base-stack) does not need a LAN VIP —
+# cf-tunnel already reaches it via its ClusterIP Service DNS name, and the
+# pihole UI (network/dns.yaml) now gets its own dedicated LoadBalancer IP and
+# terminates TLS itself instead of routing through an ingress controller. If a
+# consumer needs traefik reachable on the LAN too, give it its own
+# Service/annotation against `fe-apps` — don't reintroduce a basis->traefik
+# coupling here.
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -52,25 +61,6 @@ spec:
 apiVersion: metallb.io/v1beta1
 kind: IPAddressPool
 metadata:
-  name: traefik
-  namespace: metallb-system
-  labels:
-    entity: cluster
-    env: named
-    capability: routing
-spec:
-  autoAssign: false
-  addresses:
-    - 192.168.1.3/32
-    - fdaa:3c7e:a129:8f42::3/128
-  serviceAllocation:
-    serviceSelectors:
-      - matchLabels:
-          app.kubernetes.io/name: traefik
----
-apiVersion: metallb.io/v1beta1
-kind: IPAddressPool
-metadata:
   name: fe-apps
   namespace: metallb-system
   labels:
@@ -94,23 +84,4 @@ metadata:
 spec:
   ipAddressPools:
     - dns-pool
-    - traefik
     - fe-apps
----
-# enable gateways for native traefik.
-# NOTE: traefik itself is the k3s built-in (base-stack / cluster image). This
-# only pins its LoadBalancer IP to the metallb `traefik` pool (.3). Keep in sync
-# with base-stack if traefik ownership stays there.
-apiVersion: helm.cattle.io/v1
-kind: HelmChartConfig
-metadata:
-  name: traefik
-  namespace: kube-system
-  labels:
-    entity: cluster
-    capability: routing
-spec:
-  valuesContent: |-
-    service:
-      annotations:
-        metallb.io/loadBalancerIPs: "192.168.1.3,fdaa:3c7e:a129:8f42::3"

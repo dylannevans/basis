@@ -55,10 +55,19 @@ spec:
       FTLCONF_webserver_port: 80,[::]:80
       FTLCONF_dhcp_ipv6: "true"
     privileged: "true"
+    # The UI gets its own metallb LoadBalancer IP (shares dns-pool's single
+    # address with the manual DNS/DHCP Service below) and terminates TLS
+    # in-pod via lighttpd — no ingress controller involved, so this repo has
+    # no traefik dependency. See extraVolumes/extraObjects below.
     serviceWeb:
-      type: ClusterIP
+      type: LoadBalancer
+      http:
+        enabled: true
       https:
-        enabled: false
+        enabled: true
+      annotations:
+        metallb.universe.tf/address-pool: dns-pool
+        metallb.universe.tf/allow-shared-ip: pihole-svc
     serviceDns:
       type: ClusterIP
     serviceDhcp:
@@ -68,43 +77,54 @@ spec:
       size: 2Gi
       storageClass: ""
       enabled: true
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: dns
-  namespace: cluster-named-dns
-  labels:
-    app.kubernetes.io/name: dns-UI
-    app.kubernetes.io/part-of: dns
-    app.kubernetes.io/component: frontend
-    entity: cluster
-    env: dev
-    capability: dns
-  annotations:
-    # Traefik specific annotations
-    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
-    traefik.ingress.kubernetes.io/router.tls: "true"
-    # Automatic redirect from HTTP to HTTPS
-    traefik.ingress.kubernetes.io/redirect-entry-point: websecure
-    traefik.ingress.kubernetes.io/redirect-permanent: "true"
-spec:
-  ingressClassName: traefik
-  tls:
-    - hosts:
-        - dns.${DOMAIN}
-      secretName: famevans-tls
-  rules:
-    - host: dns.${DOMAIN}
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: cluster-named-dns-dns-pihole-web
-                port:
-                  number: 80
+    extraVolumes:
+      tls-cert:
+        secret:
+          secretName: famevans-tls
+      external-conf-cm:
+        configMap:
+          name: pihole-lighttpd-external-conf
+      external-conf:
+        emptyDir: {}
+    extraVolumeMounts:
+      tls-cert:
+        mountPath: /etc/ssl/lighttpd-private
+        readOnly: true
+      external-conf:
+        mountPath: /etc/lighttpd/external.conf
+        subPath: external.conf
+    extraInitContainers:
+      - name: copy-lighttpd-conf
+        image: busybox:stable
+        command:
+          - sh
+          - -c
+          - cp /etc/lighttpd-cm/external.conf /etc/lighttpd/external.conf
+        volumeMounts:
+          - name: external-conf-cm
+            mountPath: /etc/lighttpd-cm/
+          - name: external-conf
+            mountPath: /etc/lighttpd/
+    extraObjects:
+      - apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: pihole-lighttpd-external-conf
+        data:
+          external.conf: |
+            $HTTP["host"] =~ "dns.${DOMAIN}" {
+              setenv.add-environment = ("fqdn" => "true")
+              $SERVER["socket"] == ":443" {
+                ssl.engine = "enable"
+                ssl.pemfile = "/etc/ssl/lighttpd-private/tls.crt"
+                ssl.privkey = "/etc/ssl/lighttpd-private/tls.key"
+              }
+            }
+            $HTTP["scheme"] == "http" {
+              $HTTP["host"] =~ ".*" {
+                url.redirect = (".*" => "https://%0$0")
+              }
+            }
 ---
 apiVersion: v1
 kind: Service
@@ -120,6 +140,7 @@ metadata:
     capability: dns
   annotations:
     metallb.universe.tf/address-pool: dns-pool
+    metallb.universe.tf/allow-shared-ip: pihole-svc
 spec:
   type: LoadBalancer
   ipFamilyPolicy: PreferDualStack
