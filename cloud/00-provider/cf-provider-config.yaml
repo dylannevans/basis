@@ -1,0 +1,65 @@
+# Cloudflare ProviderConfig and credentials Secret for the personal
+# (evans-home) account, accountId ed503c805407090970caf579da8193a8.
+#
+# Copied from simplesalt/base-stack@named:3.infra/cf.yaml. Every managed
+# resource in this repo sets providerConfigRef: {name: default}, so this
+# file (plus cf-creds-assembler.yaml in this same directory) must reconcile
+# before any of them — that is why both files live in 00-provider, sorted
+# ahead of 10-access and 20-storage.
+#
+# cloudflare-credentials is populated by the assemble-cloudflare-credentials
+# Job in cf-creds-assembler.yaml, which reads the raw token from
+# cloudflare-api-token and writes the JSON-wrapped form {"api_token":"..."}
+# here. On a fresh cluster this Secret starts empty (see README: "Out-of-band
+# secrets").
+
+# Empty placeholder — the Job in cf-creds-assembler.yaml writes the data.
+# ssa:merge ensures Flux creates the object but never overwrites Job-written data.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloudflare-credentials
+  namespace: crossplane-system
+  labels:
+    entity: fe
+    capability: infra
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: merge
+type: Opaque
+---
+apiVersion: upjet-cloudflare.m.upbound.io/v1beta1
+kind: ProviderConfig
+metadata:
+  name: default
+  namespace: crossplane-system
+  labels:
+    entity: fe
+    capability: infra
+spec:
+  credentials:
+    source: Secret
+    secretRef:
+      namespace: crossplane-system
+      name: cloudflare-credentials
+      key: credentials
+---
+# Classic cluster-scoped ProviderConfig for the non-namespaced (upbound.io)
+# managed resources. The Zero Trust apps/org in 10-access are declared as
+# zero.upjet-cloudflare.upbound.io/v1alpha1, whose providerConfigRef resolves
+# against ProviderConfig.upjet-cloudflare.upbound.io (cluster-scoped) — NOT the
+# namespaced .m.upbound.io variant above (which serves the R2 Bucket in
+# 20-storage). Both point at the same cloudflare-credentials Secret.
+apiVersion: upjet-cloudflare.upbound.io/v1beta1
+kind: ProviderConfig
+metadata:
+  name: default
+  labels:
+    entity: fe
+    capability: infra
+spec:
+  credentials:
+    source: Secret
+    secretRef:
+      namespace: crossplane-system
+      name: cloudflare-credentials
+      key: credentials

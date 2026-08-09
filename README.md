@@ -14,11 +14,11 @@ basis at a different LAN by overriding that ConfigMap's value in the
 consuming repo (e.g. a Kustomize patch layered after `network/`), no edits to
 basis itself required.
 
-`cloud/cf-access-famevans.yaml` still hardcodes the Cloudflare Zero Trust team
-domain (`evans-home.cloudflareaccess.com`) — it's not wired to a Flux
-Kustomization yet (no `basis-cloud` stanza in `wiring.example.yaml`), so it
-wasn't templated here to avoid shipping an unsubstituted `${VAR}` into a live,
-orphan-protected crossplane resource.
+`cloud/10-access/cf-access-famevans.yaml` still hardcodes the Cloudflare Zero
+Trust team domain (`evans-home.cloudflareaccess.com`) — it's not wired to a
+Flux Kustomization yet (no `basis-cloud` stanza in `wiring.example.yaml`), so
+it wasn't templated here to avoid shipping an unsubstituted `${VAR}` into a
+live, orphan-protected crossplane resource.
 
 ## What's here
 
@@ -27,7 +27,99 @@ orphan-protected crossplane resource.
 | `metallb/` | MetalLB install: `metallb-system` namespace, HelmRepository, HelmRelease. |
 | `network/` | MetalLB address pools + L2 (ARP) advertisement, and DNS: pihole (DNS+DHCP, terminates its own TLS) + k8s-gateway (in-cluster upstream). No ingress controller involved — see below. |
 | `network/vars.yaml` | `basis-vars` ConfigMap — the single `DOMAIN` value (default `famevans.win`) substituted into every `${DOMAIN}` in `network/`. Override it to point basis at a different LAN. |
+| `cloud/` | Personal (evans-home) Cloudflare Crossplane resources — Zero Trust identity/Access apps and R2 storage. See "Cloudflare Crossplane resources (`cloud/`)" below. |
 | `flux/wiring.example.yaml` | Reference GitRepository + Kustomizations to add to **base-stack** to subscribe to this repo. |
+
+## Cloudflare Crossplane resources (`cloud/`)
+
+`cloud/` holds every Crossplane-managed resource for the **personal
+(evans-home) Cloudflare account**, accountId
+`ed503c805407090970caf579da8193a8`. This is the sole home for personal
+Cloudflare Crossplane resources — a separate `dylannevans/cloud-basis` repo
+was drafted for this content but is **not used**; everything was consolidated
+here instead (`simplesalt/projects#98`, `#182`) because the deploy token used
+for this repo has no push access to `cloud-basis`, and a two-repo split
+wasn't worth the coordination cost for one personal account.
+
+```
+cloud/
+├── kustomization.yaml       # aggregates the three subdirectories below
+├── 00-provider/             # ProviderConfig + credentials plumbing
+│   ├── cf-provider-config.yaml     # Secret/cloudflare-credentials (empty), both ProviderConfig/default objects
+│   └── cf-creds-assembler.yaml     # SA/Role/RoleBinding + Secret/cloudflare-api-token (empty) + assembler Job
+├── 10-access/               # Zero Trust org + Access apps
+│   ├── cf-zero-trust-org.yaml       # TrustOrganization/cloudflare-zero-trust-org
+│   ├── cf-zero-trust-apps.yaml      # TrustAccessApplication/cloudflare-app-launcher
+│   └── cf-access-famevans.yaml      # TrustAccessApplication/cloudflare-app-warp-login (+ quarantined famevans IdP)
+└── 20-storage/              # R2 storage
+    └── cf-bucket-ss-testing.yaml    # Bucket/ss-testing
+```
+
+**Ordering matters.** Everything in `10-access/` and `20-storage/` sets
+`providerConfigRef: {name: default}`, resolving against the two
+`ProviderConfig/default` objects (namespaced `.m.upbound.io` for R2, and
+cluster-scoped `upjet-cloudflare.upbound.io` for the Zero Trust apps/org)
+created in `00-provider/`, which in turn read `Secret/cloudflare-credentials`
+(also created in `00-provider/`). Directories are numbered so the dependency
+is visible in a file listing — this alone doesn't guarantee apply order
+(Flux applies everything in one Kustomization via server-side apply, and
+Crossplane's controllers retry until a referenced `ProviderConfig` exists
+either way), but it keeps the intent legible.
+
+### Out-of-band secrets
+
+Two `Secret` objects are checked in as **empty placeholders**, both annotated
+`kustomize.toolkit.fluxcd.io/ssa: merge` so Flux creates them without ever
+overwriting data written some other way. Neither ships credential material —
+this repo is public.
+
+- **`Secret/cloudflare-api-token`** (`cloud/00-provider/cf-creds-assembler.yaml`)
+  — populate on a fresh cluster with the raw Cloudflare API token:
+  ```
+  kubectl create secret generic cloudflare-api-token \
+    -n crossplane-system --from-literal=api_token=YOUR_TOKEN_HERE
+  ```
+- **`Secret/cloudflare-credentials`** (`cloud/00-provider/cf-provider-config.yaml`)
+  — populated automatically by `Job/assemble-cloudflare-credentials`
+  (`cloud/00-provider/cf-creds-assembler.yaml`) once the token above exists.
+  Re-trigger after token rotation by deleting the Job; Flux recreates it on
+  the next reconcile.
+
+### `deletionPolicy: Orphan`
+
+Every adopted managed resource in `cloud/` sets `deletionPolicy: Orphan`
+instead of the Crossplane default (`Delete`): if the MR is ever pruned —
+e.g. moved between Flux Kustomizations, or a Kustomization is deleted —
+Crossplane detaches from the live Cloudflare object rather than deleting it.
+This matters most for `TrustOrganization/cloudflare-zero-trust-org`: it's a
+per-account singleton whose create path fails ("account or zone must be
+provided"), so it can only ever be adopted, never recreated — a prune without
+Orphan would irrecoverably reset live Zero Trust org configuration. The same
+guard is applied to `TrustAccessApplication/cloudflare-app-launcher`,
+`Bucket/ss-testing`, and the pre-existing `TrustAccessApplication/cloudflare-app-warp-login`.
+
+### Adopted (not created) objects
+
+Three resources carry `crossplane.io/external-name` annotations, adopting
+the existing live Cloudflare object instead of taking the create path:
+
+| Object | `crossplane.io/external-name` |
+|---|---|
+| `TrustOrganization/cloudflare-zero-trust-org` | `ed503c805407090970caf579da8193a8` (accountId) |
+| `TrustAccessApplication/cloudflare-app-launcher` | `8b9603f4-9ac0-4e47-9aad-943fcf4b7959` |
+| `TrustAccessApplication/cloudflare-app-warp-login` | `cd1dd3f6-6bfb-44cd-91c8-2a751fae13e3` |
+
+`Bucket/ss-testing` carries no `crossplane.io/external-name` annotation —
+none was dropped in any copy, the source manifest simply never had one.
+
+### `Bucket/ss-testing`
+
+Despite the SimpleSalt-sounding name, this bucket's `accountId` is
+`ed503c805407090970caf579da8193a8` — the personal evans-home account, not
+SimpleSalt's `ssint-main`. Classification here is by **owning cloud account,
+not by object name**. If it's actually meant to be a SimpleSalt asset, that's
+a *Cloudflare-side* migration (recreate it under `ssint-main`), not a repo-
+placement decision.
 
 ## MetalLB vs kube-vip — they are NOT the same VIP
 

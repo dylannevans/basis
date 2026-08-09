@@ -1,0 +1,52 @@
+# Cloudflare Zero Trust Access Applications for the personal (evans-home)
+# account. Adopts existing apps via external-name annotations to avoid
+# duplicates.
+#
+# Copied verbatim from
+# simplesalt/base-stack@named:2.access/cf-zero-trust-apps-main.yaml.
+#
+# DELIBERATELY ABSENT: cloudflare-app-warp-login.
+# It already lives in this same repo, at
+# cloud/10-access/cf-access-famevans.yaml (moved there from
+# simplesalt/base-stack@named per simplesalt/projects#182's consolidation).
+# It sets `deletionPolicy: Orphan` and ships alongside the quarantined
+# famevans IdP that the app references by UUID. Do not add a second
+# declaration here — one TrustAccessApplication per live Cloudflare app.
+
+---
+# App Launcher
+# Launchpad for all Access apps.
+# Policy "std worker" allows any valid service token.
+# Policy "simple salt people" allows @simplesalt.company email domain.
+apiVersion: zero.upjet-cloudflare.upbound.io/v1alpha1
+kind: TrustAccessApplication
+metadata:
+  annotations:
+    crossplane.io/external-name: 8b9603f4-9ac0-4e47-9aad-943fcf4b7959
+  name: cloudflare-app-launcher
+  labels:
+    entity: fe
+    capability: access
+spec:
+  # Orphan, not Delete: this MR is adopted (external-name above), so a prune
+  # should detach Crossplane from the live Cloudflare app rather than delete
+  # it. Matches the convention already used by
+  # cloud/10-access/cf-access-famevans.yaml.
+  deletionPolicy: Orphan
+  forProvider:
+    accountId: ed503c805407090970caf579da8193a8
+    name: App Launcher
+    type: app_launcher
+    domain: evans-home.cloudflareaccess.com
+    sessionDuration: 24h
+    # No single allowedIdps here (launcher serves both SS SSO users and service
+    # tokens), so auto-redirect can't target one IdP — CF rejects it otherwise.
+    autoRedirectToIdentity: false
+    skipAppLauncherLoginPage: false
+    policies:
+      - id: 247f542a-2703-4f22-b5a2-343a52fa2d77
+        precedence: 1
+      - id: 514e6fbb-f2a1-4ad5-afb6-d09f802e45b7
+        precedence: 2
+  providerConfigRef:
+    name: default

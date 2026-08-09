@@ -1,7 +1,19 @@
-# Personal (famevans / evans-home) Cloudflare Zero Trust identity, moved out of
-# base-stack. Applied by the basis-cloud Kustomization, which depends on
-# base-stack's `access` layer for the crossplane Cloudflare zero-trust provider.
+# Personal (fe / evans-home) Cloudflare Crossplane resources — Zero Trust
+# identity/Access, R2 storage, and the provider plumbing they depend on.
+# Merged from the once-separate dylannevans/cloud-basis effort per
+# simplesalt/projects#98/#182; that repo is not used — this is the only home
+# for personal Cloudflare Crossplane resources.
+#
+# Ordering matters: 00-provider (ProviderConfig + credentials) must exist
+# before anything in 10-access or 20-storage that sets
+# providerConfigRef: {name: default}. Directories are numbered so the intent
+# is visible in a file listing; see README.md for the full explanation (this
+# alone does not guarantee apply order — Flux applies everything in one
+# Kustomization via server-side apply, and Crossplane's controllers retry
+# until a referenced ProviderConfig exists either way).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - cf-access-famevans.yaml
+  - 00-provider
+  - 10-access
+  - 20-storage

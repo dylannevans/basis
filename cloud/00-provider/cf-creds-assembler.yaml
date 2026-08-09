@@ -1,0 +1,109 @@
+# One-shot Job (plus its RBAC) that assembles the cloudflare-credentials
+# Secret consumed by the ProviderConfigs in cf-provider-config.yaml, from a
+# raw API token that is supplied out-of-band (see README: "Out-of-band
+# secrets"). Copied verbatim from
+# simplesalt/base-stack@named:2.access/cf-creds-job.yaml.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cloudflare-creds-assembler
+  namespace: crossplane-system
+  labels:
+    entity: fe
+    capability: access
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cloudflare-creds-assembler
+  namespace: crossplane-system
+  labels:
+    entity: fe
+    capability: access
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [cloudflare-api-token]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [cloudflare-credentials]
+    verbs: [get, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cloudflare-creds-assembler
+  namespace: crossplane-system
+  labels:
+    entity: fe
+    capability: access
+subjects:
+  - kind: ServiceAccount
+    name: cloudflare-creds-assembler
+    namespace: crossplane-system
+roleRef:
+  kind: Role
+  name: cloudflare-creds-assembler
+  apiGroup: rbac.authorization.k8s.io
+---
+# Raw API token placeholder. Populated out-of-band with the bare token value:
+#   kubectl create secret generic cloudflare-api-token \
+#     -n crossplane-system --from-literal=api_token=YOUR_TOKEN_HERE
+# ssa:merge ensures Flux creates the object but never overwrites a patched value.
+# On a fresh cluster this Secret is EMPTY until that out-of-band step runs —
+# see README: "Out-of-band secrets".
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloudflare-api-token
+  namespace: crossplane-system
+  labels:
+    entity: fe
+    capability: access
+  annotations:
+    kustomize.toolkit.fluxcd.io/ssa: merge
+type: Opaque
+---
+# Reads cloudflare-api-token and assembles {"api_token":"..."} into
+# cloudflare-credentials as required by the ProviderConfig. Retries on backoff
+# until the raw token is populated. Re-trigger after token rotation by deleting
+# the Job — Flux recreates it on next reconcile.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: assemble-cloudflare-credentials
+  namespace: crossplane-system
+  labels:
+    entity: fe
+    capability: access
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 8
+  template:
+    metadata:
+      labels:
+        entity: fe
+        capability: access
+    spec:
+      serviceAccountName: cloudflare-creds-assembler
+      restartPolicy: OnFailure
+      containers:
+        - name: assemble
+          image: bitnami/kubectl:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              TOKEN=$(kubectl get secret cloudflare-api-token \
+                -n crossplane-system \
+                -o jsonpath='{.data.api_token}' 2>/dev/null | base64 -d)
+              if [ -z "$TOKEN" ]; then
+                echo "cloudflare-api-token not yet populated; will retry"
+                exit 1
+              fi
+              CREDS=$(printf '{"api_token":"%s"}' "$TOKEN" | base64 -w0)
+              kubectl patch secret cloudflare-credentials \
+                -n crossplane-system \
+                --type=merge \
+                -p "{\"data\":{\"credentials\":\"$CREDS\"}}"
+              echo "cloudflare-credentials assembled successfully"

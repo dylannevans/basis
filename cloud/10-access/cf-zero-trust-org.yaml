@@ -1,0 +1,33 @@
+# Cloudflare Zero Trust Organization settings for the personal (evans-home)
+# account. Mirrors the existing config scanned from the Cloudflare API.
+# Copied verbatim from
+# simplesalt/base-stack@named:2.access/cf-zero-trust-org.yaml.
+apiVersion: zero.upjet-cloudflare.upbound.io/v1alpha1
+kind: TrustOrganization
+metadata:
+  annotations:
+    # Zero Trust org is a singleton per account — adopt it (import id = accountId)
+    # instead of taking the create path, which fails "account or zone must be provided".
+    crossplane.io/external-name: ed503c805407090970caf579da8193a8
+  name: cloudflare-zero-trust-org
+  labels:
+    entity: fe
+    capability: access
+spec:
+  # Orphan, not Delete (the base-stack default): the org is a per-account
+  # singleton whose create path fails ("account or zone must be provided"),
+  # so it can only ever be adopted, never recreated. A prune here — e.g. from
+  # moving this MR between Flux Kustomizations — would delete the live
+  # Cloudflare Zero Trust org config with no way to reconstruct it via
+  # Crossplane. Matches the convention already used by
+  # cloud/10-access/cf-access-famevans.yaml.
+  deletionPolicy: Orphan
+  forProvider:
+    accountId: ed503c805407090970caf579da8193a8
+    authDomain: evans-home.cloudflareaccess.com
+    name: evans-home.cloudflareaccess.com
+    allowAuthenticateViaWarp: true
+    warpAuthSessionDuration: 8h
+    denyUnmatchedRequests: false
+  providerConfigRef:
+    name: default

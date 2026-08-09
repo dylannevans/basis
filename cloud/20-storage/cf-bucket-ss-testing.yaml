@@ -1,0 +1,30 @@
+# R2 Bucket in the personal (evans-home) Cloudflare account. Despite the
+# SimpleSalt-sounding name, this bucket's accountId is
+# ed503c805407090970caf579da8193a8 (evans-home), not ssint-main, so per
+# #182's account-based split rule it belongs here, not in
+# simplesalt/cloud-basis. If it is meant to be a SimpleSalt asset, that is a
+# Cloudflare-side migration (recreate it under ssint-main), not a repo-
+# placement decision.
+#
+# Copied verbatim from simplesalt/base-stack@named:3.infra/cf.yaml. Note the
+# source manifest carries no crossplane.io/external-name annotation for this
+# object — none was dropped in this copy.
+apiVersion: r2.upjet-cloudflare.m.upbound.io/v1alpha1
+kind: Bucket
+metadata:
+  name: ss-testing
+  namespace: crossplane-system
+  labels:
+    entity: fe
+    capability: infra
+spec:
+  # Orphan, not Delete: a stray Flux prune should detach Crossplane from the
+  # live R2 bucket rather than delete it (and its contents). Matches the
+  # convention already used by cloud/10-access/cf-access-famevans.yaml.
+  deletionPolicy: Orphan
+  forProvider:
+    name: ss-testing
+    accountId: ed503c805407090970caf579da8193a8
+  providerConfigRef:
+    kind: ProviderConfig
+    name: default
