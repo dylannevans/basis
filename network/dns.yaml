@@ -81,6 +81,16 @@ spec:
       tls-cert:
         secret:
           secretName: famevans-tls
+          # optional, because this pod IS the LAN's resolver and famevans-tls is
+          # issued by ACME DNS-01 — which needs working DNS to reach Let's
+          # Encrypt. Without `optional` a cold cluster deadlocks permanently:
+          # kubelet holds the pod at Init on "secret famevans-tls not found",
+          # so the `dns` Service has no endpoints, so every lookup that would
+          # let cert-manager create the Order fails. See dylannevans/basis#9.
+          #
+          # An existing cluster never sees this — k1 has held famevans-tls since
+          # it was issued while DNS was already up — so it only bites a rebuild.
+          optional: true
       external-conf-cm:
         configMap:
           name: pihole-lighttpd-external-conf
@@ -96,15 +106,45 @@ spec:
     extraInitContainers:
       - name: copy-lighttpd-conf
         image: busybox:stable
+        # Marking the tls-cert volume optional is necessary but not sufficient:
+        # with the Secret absent the mount is simply an empty dir, and lighttpd
+        # refuses to start when ssl.engine is enabled and ssl.pemfile does not
+        # exist. That would swap a stuck Init for a CrashLoopBackOff and leave
+        # the deadlock exactly where it was, so the conf has to match reality.
+        #
+        # Serve plain HTTP until the cert shows up. DNS on :53 is unaffected
+        # either way — it is lighttpd, not FTL, that cares about the cert — so
+        # this trades the admin UI's TLS for a cluster that can bootstrap at
+        # all. cert-manager then issues over working DNS and the next restart
+        # picks up the full config.
         command:
           - sh
           - -c
-          - cp /etc/lighttpd-cm/external.conf /etc/lighttpd/external.conf
+          - |
+            set -eu
+            if [ -s /etc/ssl/lighttpd-private/tls.crt ]; then
+              cp /etc/lighttpd-cm/external.conf /etc/lighttpd/external.conf
+              echo "tls.crt present — serving the admin UI over HTTPS"
+            else
+              echo "tls.crt absent — serving the admin UI over plain HTTP so DNS can start"
+              echo "  (expected only until cert-manager issues famevans-tls; see basis#9)"
+              cat > /etc/lighttpd/external.conf <<'HTTPONLY'
+            $HTTP["host"] =~ "dns.${DOMAIN}" {
+              setenv.add-environment = ("fqdn" => "true")
+            }
+            HTTPONLY
+            fi
         volumeMounts:
           - name: external-conf-cm
             mountPath: /etc/lighttpd-cm/
           - name: external-conf
             mountPath: /etc/lighttpd/
+          # Read-only peek at the cert so the branch above can be taken. Same
+          # optional Secret as the main container; an absent Secret mounts empty
+          # rather than blocking, which is the whole point.
+          - name: tls-cert
+            mountPath: /etc/ssl/lighttpd-private
+            readOnly: true
     extraObjects:
       - apiVersion: v1
         kind: ConfigMap
