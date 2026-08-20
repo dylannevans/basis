@@ -203,7 +203,7 @@ Every address `network/` uses lives in `basis-vars`:
 
 | Var | Default | What it is |
 | --- | --- | --- |
-| `DNS_VIP` | `192.168.1.2` | LAN VIP pihole serves DNS/DHCP on. Also the node's upstream resolver, which is what makes #9's cold-start deadlock possible — never point pihole's own upstream here. |
+| `DNS_VIP` | `192.168.1.2` | LAN VIP pihole serves DNS/DHCP on. This is what DHCP hands out as the LAN resolver, which is what makes #9's cold-start deadlock possible on a node that accepts it — see "Why a running cluster doesn't hit #9". Never point pihole's own upstream here. |
 | `DNS_VIP6` | `fdaa:3c:a129:8f42::2` | The v6 half of the same VIP, and what DHCPv6 clients are handed as their resolver. |
 | `K8S_GATEWAY_IP` | `10.43.230.226` | k8s-gateway's pinned ClusterIP. Must be inside the Service CIDR. |
 | `LAN_ROUTER` | `192.168.1.1` | Default gateway handed to DHCP clients. |
@@ -266,9 +266,39 @@ anywhere in this repo, so a rebuild doesn't necessarily inherit them:
   above** #9: the deadlock is that pihole's pod never starts in the first place, so nothing
   is listening on `192.168.1.2` at all — the *node's* resolver (not pihole's upstream) is
   what's pointed at a dead Service. A correct upstream setting on a pod that isn't running
-  protects nothing. Whether the node's resolver should point at the cluster at all — the
-  actual fix for #9 — is a separate, still-open design decision; see #9's suggested
-  directions.
+  protects nothing.
+
+  Whether the node's resolver should point at the cluster at all — direction (2) in #9, and
+  the deeper fix — is **no longer open**. It has been decided and implemented, outside this
+  repo, and this section previously said otherwise. `simplesalt/oci@no-writeback-provisioning`
+  pins the node's resolvers off-cluster on both families, citing #9 by name:
+
+  ```
+  # cluster/Containerfile — NetworkManager connection profile
+  dns=1.1.1.1;8.8.8.8;
+  ignore-auto-dns=true
+  ```
+
+  `ignore-auto-dns` on both families is the load-bearing part: DHCP option 6 and IPv6 RDNSS
+  are two separate routes to the same mistake, and ignoring one leaves the other to
+  reintroduce it. The accepted trade-off is that names served only by the LAN resolver (the
+  `.lan` domain pihole hands out) stop resolving from the node and from pods that inherit
+  this via CoreDNS. Public names, `${DOMAIN}` included, are unaffected — it is a real public
+  zone, which is how its ACME DNS-01 issuance works in the first place.
+
+  k1 is already in this state too, by a different route, which is a **third** reason it is
+  immune to #9 and one this section did not previously record:
+
+  ```
+  $ resolvectl status
+  Global:      DNS Servers: 1.1.1.1 8.8.8.8
+  Link 2 (eth0):  DNS Servers: 192.168.1.1 8.8.8.8
+  ```
+
+  Nothing on k1 points at `192.168.1.2`. So the premise stated in #9 and #11 — that the
+  node's resolver is the DNS VIP — is a property of a **freshly DHCP'd node that accepts
+  option 6**, which is what the USB reprovision produced. It is not true of k1, and it is not
+  true of anything built from the branch above. Read those issues with that in mind.
 - **k3s's built-in `servicelb` must stay disabled** (`base-stack`'s `install.sh`/`create.sh`
   pass `--disable servicelb`) wherever this repo's MetalLB lands, or the two controllers
   fight over the same hostPorts. A cluster built via the USB provisioning path
