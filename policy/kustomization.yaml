@@ -1,0 +1,14 @@
+# Kyverno policy layer: defaults spec.loadBalancerClass onto LoadBalancer
+# Services so MetalLB's --lb-class filtering (metallb/helmrelease.yaml)
+# doesn't strand classless Services. See README.md "MetalLB loadBalancerClass
+# policy" and the header comment on kyverno-metallb-lb-class.yaml.
+#
+# Requires Kyverno's CRDs + admission webhook already installed and Ready --
+# that comes from base-stack's `1.basis` layer, not from basis itself (same
+# upward dependency shape as cert-manager). Must be reconciled, and its
+# ClusterPolicy Ready, BEFORE ../network (or any other Kustomization that
+# creates a LoadBalancer Service) -- see flux/wiring.example.yaml.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - kyverno-metallb-lb-class.yaml
