@@ -47,8 +47,26 @@ spec:
         - "dhcp-option=option6:23,[${DNS_VIP6:=fdaa:3c:a129:8f42::2}]"
         - "dhcp-option=option6:39"
         - "enable-ra"
+    # hostNetwork is required for RA (ICMPv6 134 -> ff02::1), Router
+    # Solicitation (ff02::2) and DHCPv6 SOLICIT (ff02::1:2, UDP/547) to
+    # reach the LAN at all: these are link-local multicast, and MetalLB L2
+    # only answers ARP/NDP for the Service's unicast external IP — it does
+    # not forward multicast into the pod netns. See dylannevans/basis#8.
+    hostNetwork: "true"
+    # dnsPolicy defaults to "ClusterFirst" when podDnsConfig is disabled,
+    # but Kubernetes silently downgrades that to host-resolv.conf behavior
+    # for hostNetwork pods. Explicitly requesting ClusterFirstWithHostNet
+    # keeps the pod able to resolve cluster Service names, and — more
+    # importantly on this LAN — keeps it OFF the node's own resolv.conf,
+    # which (per dylannevans/basis#9) currently points at 192.168.1.2, the
+    # very LoadBalancer IP this Service occupies. Falling back to the node's
+    # resolver here would hand pihole's own outbound lookups a resolver
+    # that's circularly itself. nameservers is left empty: we don't want to
+    # add any beyond what ClusterFirstWithHostNet already provides.
     podDnsConfig:
-      enabled: false
+      enabled: true
+      policy: ClusterFirstWithHostNet
+      nameservers: []
     admin:
       enabled: true
       adminPassword: dummy
