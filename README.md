@@ -195,6 +195,52 @@ These base-stack resources reference basis-owned objects by name/annotation
 deprovisioned in base-stack independently of this migration, superseded by
 `ssint-main-cal`, so it's no longer a consumer.)
 
+## Why a running cluster doesn't hit the #9 cold-start DNS deadlock
+
+[#9](https://github.com/dylannevans/basis/issues/9) describes an unrecoverable deadlock on a
+**fresh** single-node cluster: `network/metallb-pools.yaml` pins `dns-pool` to `192.168.1.2`,
+which is also the address DHCP hands the node as its own upstream resolver; pihole's Service
+takes that IP but its pod can't start until `famevans-tls` exists; that cert is issued by
+cert-manager over ACME DNS-01, which needs outbound DNS; and the node (and therefore CoreDNS)
+resolves outbound queries via `192.168.1.2` — the endpoint-less Service pihole hasn't managed
+to stand up yet. Nothing breaks the loop on its own.
+
+A cluster that's already running (k1) is immune to that specific deadlock, but not because
+anything here defends against it — it's immune because **it never takes the cold-start
+branch**. k1 already holds the `famevans-tls` secret, issued 26+ days ago while DNS was still
+up, so every restart takes the happy path: pihole mounts the existing cert and starts
+immediately, no ACME round-trip required, no dependency on the resolver it's about to become.
+The deadlock in #9 is reachable only from a cold start — a fresh cluster with no cert yet —
+which is exactly the case a USB reprovision creates and a routine reboot doesn't. Fixed for
+the cold-start case itself in #10.
+
+Two more properties worth recording, because they're **implicit** — true today, not asserted
+anywhere in this repo, so a rebuild doesn't necessarily inherit them:
+
+- **pihole's own upstream is static public DNS** (`FTLCONF_dns_upstreams` in
+  `network/dns.yaml`, pinned to `8.8.8.8;8.8.4.4`), so once pihole is actually running it
+  never forwards queries back into the cluster. That matters, but it operates **one level
+  above** #9: the deadlock is that pihole's pod never starts in the first place, so nothing
+  is listening on `192.168.1.2` at all — the *node's* resolver (not pihole's upstream) is
+  what's pointed at a dead Service. A correct upstream setting on a pod that isn't running
+  protects nothing. Whether the node's resolver should point at the cluster at all — the
+  actual fix for #9 — is a separate, still-open design decision; see #9's suggested
+  directions.
+- **k3s's built-in `servicelb` must stay disabled** (`base-stack`'s `install.sh`/`create.sh`
+  pass `--disable servicelb`) wherever this repo's MetalLB lands, or the two controllers
+  fight over the same hostPorts. A cluster built via the USB provisioning path
+  (`simplesalt/oci`'s `create-usb.sh`) currently renders no `disable:` line, so it comes up
+  with `svclb-*` DaemonSets that MetalLB has to compete with — e.g. `svclb-traefik` can grab
+  80/443 before `svclb-*-pihole-web` gets a chance to schedule. Tracked as
+  `simplesalt/oci#64`; not a basis bug, but it affects any cluster this repo's pools land on.
+
+Also worth knowing so it doesn't get re-filed: traefik's `LoadBalancer` Service sitting at
+`<pending>` (`kubectl get svc -n kube-system traefik`) is **expected**, not a regression.
+Both `dns-pool` and `fe-apps` in `network/metallb-pools.yaml` set `autoAssign: false`, and
+traefik's Service carries no pool annotation requesting either one, so MetalLB never
+allocates it an address — by design, per "Traefik/metallb are decoupled" above. k1 has sat in
+this state for its entire life with nothing depending on it.
+
 ## Cutover (test plan)
 
 1. Push this repo's `main`.
