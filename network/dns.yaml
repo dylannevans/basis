@@ -210,27 +210,8 @@ spec:
   # single-stack one — degraded rather than rejected.
   ipFamilyPolicy: PreferDualStack
   selector:
-    # `app: pihole` ONLY. Do not re-add `release:`.
-    #
-    # The obvious-looking second label would be `release: cluster-named-dns-dns`,
-    # copying what the chart puts on its own Services. But that string is not a
-    # name anyone chose — helm-controller derives releaseName as
-    # <targetNamespace>-<metadata.name>, so it silently encodes the namespace
-    # into this selector. Rename the namespace or the HelmRelease and the pods'
-    # `release` label moves while this does not.
-    #
-    # The failure is silent, which is what makes it worth a comment: the Service
-    # still gets its MetalLB address, still reports type: LoadBalancer with an
-    # ingress IP, and still passes every Flux health check — it just has zero
-    # endpoints, and LAN DNS/DHCP black-holes with no error anywhere. That is
-    # the same shape as the #9 deadlock, reached by a rename instead of a cold
-    # start. This repo is slated to drop `named` from its object names, so the
-    # tripwire sits directly on a planned change. simplesalt/projects#315.
-    #
-    # `app` is the chart-name label and no nameOverride is set, so this selects
-    # the same pods. `release` would only earn its place if a second pihole
-    # release shared the namespace, which is not planned.
     app: pihole
+    release: cluster-named-dns-dns
   ports:
     - name: dns-tcp
       port: 53
