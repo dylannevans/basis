@@ -8,4 +8,30 @@ metadata:
     capability: dns
 data:
   DOMAIN: famevans.win
-  K8S_GATEWAY_IP: 10.43.171.237
+
+  # k8s-gateway's ClusterIP. This is now PINNED on the Service itself (see
+  # network/dns.yaml), not merely transcribed — dylannevans/basis#15. Must fall
+  # inside the cluster's Service CIDR; a consumer with a different CIDR has to
+  # override it.
+  #
+  # Corrected from 10.43.171.237, which was the address k1's Service held when
+  # the forwarder line was first written. The Service has been recreated since
+  # and now holds .230.226, so the forwarder was pointing at an address no
+  # Service owns — see the PR that introduced this key.
+  K8S_GATEWAY_IP: 10.43.230.226
+
+  # The LAN VIP pihole answers DNS/DHCP on. Also the address the node's own
+  # resolver points at, which is what makes #9's cold-start deadlock possible —
+  # do not point pihole's own upstream here.
+  DNS_VIP: 192.168.1.2
+  DNS_VIP6: fdaa:3c:a129:8f42::2
+
+  # LAN topology handed to DHCP clients.
+  LAN_ROUTER: 192.168.1.1
+  LAN_NETMASK: 255.255.255.0
+  DHCP_START: 192.168.1.100
+  DHCP_END: 192.168.1.200
+
+  # metallb pool for general application Services (entity: fe).
+  APPS_POOL_V4: 192.168.1.32-192.168.1.64
+  APPS_POOL_V6: fdaa:3c7e:a129:8f42::32-fdaa:3c7e:a129:8f42::64
