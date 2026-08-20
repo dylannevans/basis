@@ -29,7 +29,7 @@ spec:
     virtualHost: dns.${DOMAIN}
     dnsmasq:
       customSettings:
-        - "server=/${DOMAIN}/10.43.171.237"
+        - "server=/${DOMAIN}/${K8S_GATEWAY_IP}"
         - "dhcp-authoritative"
         - "domain=lan"
         - "expand-hosts"

@@ -167,13 +167,19 @@ base-stack's `1.basis` layer.
   base-stack. The `simplesalt` ClusterIssuer (public domain) also stays.
 - Nothing traefik-related — see "Traefik/metallb are decoupled" above.
 
-One fragile hardcode remains: `network/dns.yaml` pins k8s-gateway's Service
-`clusterIP` (`10.43.171.237`) and references that same literal in pihole's
-dnsmasq forwarder config (`server=/${DOMAIN}/10.43.171.237`). dnsmasq can only
-forward to a literal IP — it can't resolve a Kubernetes Service DNS name
-itself, since it *is* the resolver — so this is the one value in `network/`
-that's tied to a specific cluster's Service CIDR and isn't behind `${DOMAIN}`.
-Update both occurrences together if you fork this for another cluster.
+The k8s-gateway ClusterIP that used to be hardcoded in `network/dns.yaml` is
+now parametrized: pihole's dnsmasq forwarder config
+(`server=/${DOMAIN}/${K8S_GATEWAY_IP}`) reads `K8S_GATEWAY_IP` from
+`basis-vars` (`network/vars.yaml`, default `10.43.171.237`), the same way
+`${DOMAIN}` is handled. dnsmasq can only forward to a literal IP — it can't
+resolve a Kubernetes Service DNS name itself, since it *is* the resolver — so
+this value is still tied to a specific cluster's Service CIDR, but it's no
+longer hardcoded: override `K8S_GATEWAY_IP` in `basis-vars` the same way you'd
+override `DOMAIN` to point basis at a different LAN's Service CIDR. (Note: the
+k8s-gateway HelmRelease's `service` values only set `type: ClusterIP`; they
+don't pin `spec.clusterIP` explicitly — the actual ClusterIP is chosen by
+Kubernetes and reused only in the dnsmasq forwarder line, which is the sole
+occurrence this parametrization needed to touch.)
 
 ## Cross-repo consumers left in base-stack
 

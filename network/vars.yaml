@@ -8,3 +8,4 @@ metadata:
     capability: dns
 data:
   DOMAIN: famevans.win
+  K8S_GATEWAY_IP: 10.43.171.237
