@@ -29,7 +29,15 @@ spec:
     virtualHost: dns.${DOMAIN}
     dnsmasq:
       customSettings:
-        - "server=/${DOMAIN}/10.43.171.237"
+        # ${K8S_GATEWAY_IP:=...} carries an inline default on purpose. Flux
+        # substitutes the whole build BEFORE applying it, so on the first
+        # reconcile after this lands, the in-cluster basis-vars ConfigMap is
+        # still the old one that has only DOMAIN — the new key does not exist
+        # yet, because the ConfigMap that defines it is applied by this very
+        # pass. An undefined ${var} renders as the EMPTY STRING, which would
+        # ship "server=/famevans.win/" to dnsmasq for one interval. The default
+        # makes that pass render the correct address instead.
+        - "server=/${DOMAIN}/${K8S_GATEWAY_IP:=10.43.171.237}"
         - "dhcp-authoritative"
         - "domain=lan"
         - "expand-hosts"
