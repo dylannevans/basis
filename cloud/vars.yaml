@@ -1,0 +1,23 @@
+# basis-cloud-vars — the Flux postBuild.substituteFrom source for cloud/,
+# mirroring network/vars.yaml's basis-vars pattern (see README
+# "Cluster-independence"). Kept as its own ConfigMap rather than reusing
+# basis-vars: cloud/ (personal evans-home Cloudflare account) and network/
+# (LAN metallb+DNS) are independent layers with no data or ordering
+# dependency on each other. Folding cloud/'s vars into basis-vars would force
+# an artificial dependsOn on basis-network purely so the ConfigMap exists —
+# see flux/wiring.example.yaml's basis-cloud stanza.
+#
+# The committed defaults below are the live evans-home account's current
+# values, so a cluster that applies this unchanged gets byte-identical
+# behaviour to the previously-hardcoded manifests.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: basis-cloud-vars
+  namespace: flux-system
+  labels:
+    entity: fe
+    capability: access
+data:
+  CF_ACCESS_TEAM: evans-home.cloudflareaccess.com
+  CF_ACCOUNT_ID: ed503c805407090970caf579da8193a8

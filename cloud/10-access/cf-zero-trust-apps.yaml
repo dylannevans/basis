@@ -22,6 +22,11 @@ apiVersion: zero.upjet-cloudflare.upbound.io/v1alpha1
 kind: TrustAccessApplication
 metadata:
   annotations:
+    # NOT templated, deliberately: this is the adoption pointer at the live
+    # Cloudflare app. accountId/domain below are plain data and are safe to
+    # substitute; an identity value is not — a misfire here would re-point or
+    # orphan the real object rather than just misconfigure it. Same rule as
+    # cf-access-famevans.yaml. The policy UUIDs below are identity too.
     crossplane.io/external-name: 8b9603f4-9ac0-4e47-9aad-943fcf4b7959
   name: cloudflare-app-launcher
   labels:
@@ -34,10 +39,10 @@ spec:
   # cloud/10-access/cf-access-famevans.yaml.
   deletionPolicy: Orphan
   forProvider:
-    accountId: ed503c805407090970caf579da8193a8
+    accountId: ${CF_ACCOUNT_ID}
     name: App Launcher
     type: app_launcher
-    domain: evans-home.cloudflareaccess.com
+    domain: ${CF_ACCESS_TEAM}
     sessionDuration: 24h
     # No single allowedIdps here (launcher serves both SS SSO users and service
     # tokens), so auto-redirect can't target one IdP — CF rejects it otherwise.

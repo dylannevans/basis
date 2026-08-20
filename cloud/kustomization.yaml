@@ -14,6 +14,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
+  - vars.yaml
   - 00-provider
   - 10-access
   - 20-storage

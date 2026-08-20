@@ -8,6 +8,12 @@ metadata:
   annotations:
     # Zero Trust org is a singleton per account — adopt it (import id = accountId)
     # instead of taking the create path, which fails "account or zone must be provided".
+    #
+    # Left LITERAL on purpose even though it is the same string as
+    # ${CF_ACCOUNT_ID} below. Here the value is the import identity; below it is
+    # plain data. Templating the identity would mean a substitution misfire
+    # detaches Crossplane from the live singleton org — which, per the
+    # deletionPolicy note below, cannot be recreated.
     crossplane.io/external-name: ed503c805407090970caf579da8193a8
   name: cloudflare-zero-trust-org
   labels:
@@ -23,9 +29,9 @@ spec:
   # cloud/10-access/cf-access-famevans.yaml.
   deletionPolicy: Orphan
   forProvider:
-    accountId: ed503c805407090970caf579da8193a8
-    authDomain: evans-home.cloudflareaccess.com
-    name: evans-home.cloudflareaccess.com
+    accountId: ${CF_ACCOUNT_ID}
+    authDomain: ${CF_ACCESS_TEAM}
+    name: ${CF_ACCESS_TEAM}
     allowAuthenticateViaWarp: true
     warpAuthSessionDuration: 8h
     denyUnmatchedRequests: false

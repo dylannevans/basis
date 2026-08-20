@@ -14,11 +14,19 @@ basis at a different LAN by overriding that ConfigMap's value in the
 consuming repo (e.g. a Kustomize patch layered after `network/`), no edits to
 basis itself required.
 
-`cloud/10-access/cf-access-famevans.yaml` still hardcodes the Cloudflare Zero
-Trust team domain (`evans-home.cloudflareaccess.com`) — it's not wired to a
-Flux Kustomization yet (no `basis-cloud` stanza in `wiring.example.yaml`), so
-it wasn't templated here to avoid shipping an unsubstituted `${VAR}` into a
-live, orphan-protected crossplane resource.
+`cloud/10-access/cf-access-famevans.yaml`'s Cloudflare Zero Trust team domain
+(`${CF_ACCESS_TEAM}`) and account ID (`${CF_ACCOUNT_ID}`) are likewise
+substituted, via the `basis-cloud` Kustomization in `flux/wiring.example.yaml`
+against a dedicated `basis-cloud-vars` ConfigMap (`cloud/vars.yaml`) — kept
+separate from `basis-vars` because `cloud/` and `network/` are independent
+layers with no data dependency on each other. Committed defaults
+(`evans-home.cloudflareaccess.com` / `ed503c805407090970caf579da8193a8`)
+match the previous hardcoded values byte-for-byte. The `crossplane.io/
+external-name` UUIDs in that file (and the IdP/policy UUIDs it references)
+are deliberately left hardcoded — they identify specific LIVE, orphan-
+protected crossplane objects, and a misconfigured substitution path for an
+identity value risks crossplane re-pointing or failing to adopt the live
+resource in a way a plain data field (domain/account ID) does not.
 
 ## What's here
 

@@ -24,7 +24,7 @@ spec:
   deletionPolicy: Orphan
   forProvider:
     name: ss-testing
-    accountId: ed503c805407090970caf579da8193a8
+    accountId: ${CF_ACCOUNT_ID}
   providerConfigRef:
     kind: ProviderConfig
     name: default
