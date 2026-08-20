@@ -96,6 +96,23 @@ spec:
   # to avoid. See README "Cluster-independence".
   postBuild:
     substituteFrom:
+      # DO NOT add `optional: true` here. It looks like the obvious fix the
+      # first time this Kustomization reports `configmaps "basis-cloud-vars"
+      # not found` — but Flux's substitution is envsubst-shaped: an unresolved
+      # ${VAR} becomes the EMPTY STRING, it does not stay literal and it does
+      # not fall back to anything. With `optional: true` and the ConfigMap
+      # missing, `accountId: ${CF_ACCOUNT_ID}` renders as `accountId: ""` and
+      # Crossplane pushes that at the LIVE, deletionPolicy:Orphan Cloudflare
+      # objects under cloud/.
+      #
+      # Left non-optional so it fails CLOSED: a missing ConfigMap stops the
+      # Kustomization instead of silently blanking a live Access app. Note
+      # cloud/vars.yaml ships the ConfigMap inside this very path, so on a
+      # cold cluster it does not exist until this Kustomization's first
+      # successful apply — which needs it. Break that by applying
+      # cloud/vars.yaml (or an override ConfigMap) once, out of band, BEFORE
+      # the first reconcile. Same shape as the cold-start traps in #9/#15:
+      # fine forever on a cluster that already has it, fatal on a rebuild.
       - kind: ConfigMap
         name: basis-cloud-vars
         # basis ships cloud/vars.yaml with CF_ACCESS_TEAM:

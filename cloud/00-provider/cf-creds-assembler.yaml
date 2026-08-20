@@ -92,18 +92,28 @@ spec:
         - name: assemble
           image: bitnami/kubectl:latest
           command: ["/bin/sh", "-c"]
+          # NOTE the $$ escapes below. Once a Flux Kustomization applies this
+          # path with postBuild.substituteFrom (basis-cloud does — see
+          # flux/wiring.example.yaml), every ${VAR} and $VAR in these manifests
+          # is envsubst'd, INCLUDING shell variables in this script. Unescaped,
+          # $TOKEN and $CREDS are undefined at substitution time and render as
+          # the empty string, which makes `[ -z "" ]` always true: the Job
+          # exits 1 on every attempt, cloudflare-credentials is never
+          # assembled, and every ProviderConfig in cloud/ is left without a
+          # token. Flux turns $$ back into a literal $, so the container sees
+          # ${TOKEN}/${CREDS} as intended.
           args:
             - |
               TOKEN=$(kubectl get secret cloudflare-api-token \
                 -n crossplane-system \
                 -o jsonpath='{.data.api_token}' 2>/dev/null | base64 -d)
-              if [ -z "$TOKEN" ]; then
+              if [ -z "$${TOKEN}" ]; then
                 echo "cloudflare-api-token not yet populated; will retry"
                 exit 1
               fi
-              CREDS=$(printf '{"api_token":"%s"}' "$TOKEN" | base64 -w0)
+              CREDS=$(printf '{"api_token":"%s"}' "$${TOKEN}" | base64 -w0)
               kubectl patch secret cloudflare-credentials \
                 -n crossplane-system \
                 --type=merge \
-                -p "{\"data\":{\"credentials\":\"$CREDS\"}}"
+                -p "{\"data\":{\"credentials\":\"$${CREDS}\"}}"
               echo "cloudflare-credentials assembled successfully"
