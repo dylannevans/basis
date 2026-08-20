@@ -66,7 +66,16 @@ spec:
     podDnsConfig:
       enabled: true
       policy: ClusterFirstWithHostNet
-      nameservers: []
+      # NOT [] — the chart renders this as `nameservers:` followed by a flow
+      # sequence at the SAME indentation (`{{- toYaml ... | nindent 8 }}` under
+      # a key already at 8), which is invalid YAML and fails the Helm render.
+      # A block sequence at equal indent is legal, an empty flow one is not, so
+      # the field has to be non-empty. Matches the FTLCONF_dns_upstreams pinned
+      # above, and under ClusterFirstWithHostNet these are appended after
+      # cluster DNS rather than replacing it.
+      nameservers:
+        - 8.8.8.8
+        - 8.8.4.4
     admin:
       enabled: true
       adminPassword: dummy
