@@ -6,7 +6,8 @@ DNS/DHCP) lives in one place.
 
 ## Cluster-independence
 
-`network/` has no hardcoded FQDNs — every hostname is `${DOMAIN}`, substituted
+`network/` has no hardcoded FQDNs and no hardcoded addresses — every hostname
+is `${DOMAIN}` and every IP is a named var (see "Addressing"), substituted
 at reconcile time via Flux `postBuild.substituteFrom` (wired in
 `flux/wiring.example.yaml`) against the `basis-vars` ConfigMap
 (`network/vars.yaml`). The committed default is `DOMAIN: famevans.win`; point
@@ -34,7 +35,7 @@ resource in a way a plain data field (domain/account ID) does not.
 |---|---|
 | `metallb/` | MetalLB install: `metallb-system` namespace, HelmRepository, HelmRelease. |
 | `network/` | MetalLB address pools + L2 (ARP) advertisement, and DNS: pihole (DNS+DHCP, terminates its own TLS) + k8s-gateway (in-cluster upstream). No ingress controller involved — see below. |
-| `network/vars.yaml` | `basis-vars` ConfigMap — the single `DOMAIN` value (default `famevans.win`) substituted into every `${DOMAIN}` in `network/`. Override it to point basis at a different LAN. |
+| `network/vars.yaml` | `basis-vars` ConfigMap — `DOMAIN` (default `famevans.win`) plus every address `network/` uses (see "Addressing"). Substituted into `network/` at reconcile time. Override to point basis at a different LAN. |
 | `cloud/` | Personal (evans-home) Cloudflare Crossplane resources — Zero Trust identity/Access apps and R2 storage. See "Cloudflare Crossplane resources (`cloud/`)" below. |
 | `flux/wiring.example.yaml` | Reference GitRepository + Kustomizations to add to **base-stack** to subscribe to this repo. |
 
@@ -175,19 +176,53 @@ base-stack's `1.basis` layer.
   base-stack. The `simplesalt` ClusterIssuer (public domain) also stays.
 - Nothing traefik-related — see "Traefik/metallb are decoupled" above.
 
-The k8s-gateway ClusterIP that used to be hardcoded in `network/dns.yaml` is
-now parametrized: pihole's dnsmasq forwarder config
-(`server=/${DOMAIN}/${K8S_GATEWAY_IP}`) reads `K8S_GATEWAY_IP` from
-`basis-vars` (`network/vars.yaml`, default `10.43.171.237`), the same way
-`${DOMAIN}` is handled. dnsmasq can only forward to a literal IP — it can't
-resolve a Kubernetes Service DNS name itself, since it *is* the resolver — so
-this value is still tied to a specific cluster's Service CIDR, but it's no
-longer hardcoded: override `K8S_GATEWAY_IP` in `basis-vars` the same way you'd
-override `DOMAIN` to point basis at a different LAN's Service CIDR. (Note: the
-k8s-gateway HelmRelease's `service` values only set `type: ClusterIP`; they
-don't pin `spec.clusterIP` explicitly — the actual ClusterIP is chosen by
-Kubernetes and reused only in the dnsmasq forwarder line, which is the sole
-occurrence this parametrization needed to touch.)
+`network/` no longer hardcodes any address. Every IP — the DNS/DHCP VIP, the
+metallb pool ranges, the DHCP scope and router, and the k8s-gateway ClusterIP —
+is a `${VAR:=default}` reference resolved from `basis-vars`
+(`network/vars.yaml`) the same way `${DOMAIN}` is. See "Addressing" below.
+
+**k8s-gateway's ClusterIP is now pinned, not observed.** dnsmasq can only
+forward to a literal IP — it cannot resolve a Kubernetes Service name, since it
+*is* the resolver — so `server=/${DOMAIN}/${K8S_GATEWAY_IP}` needs a real
+address. Previously the Service didn't set `spec.clusterIP` at all, so that
+address was whatever Kubernetes happened to assign, transcribed into the
+forwarder by hand. That drifts: on k1 the Service had been recreated and moved
+to a different ClusterIP, leaving the forwarder aimed at an address no Service
+owned and the whole `${DOMAIN}` zone black-holed (dylannevans/basis#15). The
+Service now pins `clusterIP: ${K8S_GATEWAY_IP}`, so the forwarder and the
+Service are two references to one asserted value rather than a value and a copy
+of it.
+
+The pinned address must fall inside the cluster's Service CIDR, so it is still
+cluster-specific — override `K8S_GATEWAY_IP` in `basis-vars` for a cluster with
+a different CIDR, exactly as you would `DOMAIN`.
+
+## Addressing
+
+Every address `network/` uses lives in `basis-vars`:
+
+| Var | Default | What it is |
+| --- | --- | --- |
+| `DNS_VIP` | `192.168.1.2` | LAN VIP pihole serves DNS/DHCP on. Also the node's upstream resolver, which is what makes #9's cold-start deadlock possible — never point pihole's own upstream here. |
+| `DNS_VIP6` | `fdaa:3c:a129:8f42::2` | The v6 half of the same VIP, and what DHCPv6 clients are handed as their resolver. |
+| `K8S_GATEWAY_IP` | `10.43.230.226` | k8s-gateway's pinned ClusterIP. Must be inside the Service CIDR. |
+| `LAN_ROUTER` | `192.168.1.1` | Default gateway handed to DHCP clients. |
+| `LAN_NETMASK` | `255.255.255.0` | Netmask handed to DHCP clients. |
+| `DHCP_START` / `DHCP_END` | `192.168.1.100` / `.200` | DHCPv4 scope. |
+| `APPS_POOL_V4` / `APPS_POOL_V6` | `192.168.1.32-192.168.1.64` / `fdaa:3c7e:a129:8f42::32-…::64` | metallb pool for application Services. |
+
+Each reference carries an **inline default** (`${VAR:=default}`) rather than
+relying only on the committed ConfigMap. This is not belt-and-braces — it is
+required for correctness. Flux substitutes the whole build *before* applying
+it, and `basis-vars` is applied by the same pass that consumes it, so any newly
+added key is undefined on its first reconcile. Flux renders an undefined
+`${var}` as the **empty string**, so without the default a new key ships an
+empty address to dnsmasq or metallb for one interval. Keep the default in sync
+with the ConfigMap when changing a value.
+
+Note `DNS_VIP6` (`fdaa:3c:…`) and `APPS_POOL_V6` (`fdaa:3c7e:…`) are on
+different /64s. That is preserved as-is, not endorsed — see
+dylannevans/basis#19.
 
 ## Cross-repo consumers left in base-stack
 

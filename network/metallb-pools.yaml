@@ -51,8 +51,13 @@ metadata:
 spec:
   autoAssign: false
   addresses:
-    - 192.168.1.2/32
-    - fdaa:3c:a129:8f42::2/128
+    - ${DNS_VIP:=192.168.1.2}/32
+    # NOTE the prefix here is fdaa:3c:... while fe-apps below and the comment at
+    # the top of this file both use fdaa:3c7e:... — a one-nibble difference that
+    # puts the DNS VIP on a different /64 from every application Service.
+    # Preserved exactly as-is here because changing it moves the LAN's live DNS
+    # address; see dylannevans/basis#19 for the decision.
+    - ${DNS_VIP6:=fdaa:3c:a129:8f42::2}/128
   serviceAllocation:
     serviceSelectors:
       - matchLabels:
@@ -70,8 +75,8 @@ metadata:
 spec:
   autoAssign: false
   addresses:
-    - 192.168.1.32-192.168.1.64
-    - fdaa:3c7e:a129:8f42::32-fdaa:3c7e:a129:8f42::64
+    - ${APPS_POOL_V4:=192.168.1.32-192.168.1.64}
+    - ${APPS_POOL_V6:=fdaa:3c7e:a129:8f42::32-fdaa:3c7e:a129:8f42::64}
 ---
 apiVersion: metallb.io/v1beta1
 kind: L2Advertisement
