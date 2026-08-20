@@ -34,6 +34,7 @@ resource in a way a plain data field (domain/account ID) does not.
 | Path | Contents |
 |---|---|
 | `metallb/` | MetalLB install: `metallb-system` namespace, HelmRepository, HelmRelease. |
+| `policy/` | Kyverno `ClusterPolicy` that defaults `loadBalancerClass` onto `LoadBalancer` Services — see "MetalLB loadBalancerClass policy" below. |
 | `network/` | MetalLB address pools + L2 (ARP) advertisement, and DNS: pihole (DNS+DHCP, terminates its own TLS) + k8s-gateway (in-cluster upstream). No ingress controller involved — see below. |
 | `network/vars.yaml` | `basis-vars` ConfigMap — `DOMAIN` (default `famevans.win`) plus every address `network/` uses (see "Addressing"). Substituted into `network/` at reconcile time. Override to point basis at a different LAN. |
 | `cloud/` | Personal (evans-home) Cloudflare Crossplane resources — Zero Trust identity/Access apps and R2 storage. See "Cloudflare Crossplane resources (`cloud/`)" below. |
@@ -150,6 +151,69 @@ MetalLB unchanged.) MetalLB here already runs in **L2/ARP mode**
 (`L2Advertisement`) — the "BGP" note in `network/metallb-pools.yaml` is a
 long-term aspiration, not the running config.
 
+## MetalLB loadBalancerClass policy
+
+`metallb/helmrelease.yaml` sets `loadBalancerClass: metallb.universe.tf/metallb`
+(the chart's top-level `loadBalancerClass` value, plumbed to the controller as
+`--lb-class`; verified against the upstream chart source — the
+`loadBalancerClass: ""` key in `charts/metallb/values.yaml` and its consumption
+as `--lb-class={{ .Values.loadBalancerClass }}` in
+`charts/metallb/templates/controller.yaml` — rather than assumed from the
+chart's docs). Once MetalLB has a class, its service controller filters
+*every* `LoadBalancer` Service by that exact class — including Services that
+never set one, not just ones with a different class (see
+`metallb/helmrelease.yaml`'s comment for the upstream source references).
+That makes `loadBalancerClass` an all-or-nothing, cluster-wide contract the
+moment MetalLB adopts it: any `LoadBalancer` Service anywhere in the cluster
+(this repo, base-stack, any other consumer) that doesn't carry the class
+silently gets no IP.
+
+`policy/kyverno-metallb-lb-class.yaml` turns that contract into something the
+cluster enforces automatically: a Kyverno mutating `ClusterPolicy` that, on
+**CREATE only**, injects `spec.loadBalancerClass: metallb.universe.tf/metallb`
+onto any `type: LoadBalancer` Service that doesn't already declare a class.
+
+**Escape hatch (two of them, either is sufficient):**
+- Set `spec.loadBalancerClass` yourself in the manifest — the policy only
+  fills in an *unset* field, it never overrides one that's already there.
+- Label the Service `basis/skip-lb-class: "true"` — an explicit opt-out for a
+  Service that intentionally wants to stay classless (e.g. targeting klipper
+  or some other LB implementation) even though it sets `type: LoadBalancer`.
+
+**Upward dependency:** Kyverno itself is not installed by basis — it comes
+from base-stack's `1.basis` layer, so `policy/` is a *second* upward
+dependency of the same kind already documented for cert-manager below (basis
+must reconcile after base-stack's `1.basis`, and specifically after Kyverno's
+CRDs + admission webhook are Ready). See the header comment in
+`policy/kyverno-metallb-lb-class.yaml` for the full reasoning.
+
+**CREATE-only, and why that matters — `loadBalancerClass` is immutable.**
+Kubernetes rejects any attempt to set `spec.loadBalancerClass` on a Service
+that already exists, so the policy can only affect Services at creation time;
+it cannot retroactively fix ones that predate it. On k1 today that's the
+`dns` and `pihole-web` Services in `network/dns.yaml` — the LAN's DNS/DHCP
+Service. Recreating them is a real, if brief, outage, so it's deliberate and
+manual, not automated by this change. See "Migration on k1" in the PR that
+introduced this policy (dylannevans/basis#12) for the exact sequenced
+procedure — merging the policy does **not** by itself migrate those two
+Services; that is a separate, manual second step.
+
+**Bootstrap ordering.** The policy must be admitted (webhook Ready) *before*
+the first `LoadBalancer` Service is created in a given Kustomization, or that
+Service is created classless and a class-scoped MetalLB silently ignores it —
+a fresh-cluster-only failure, the same shape of bug that took a rebuild to
+surface in #9. `flux/wiring.example.yaml` expresses this with a `basis-policy`
+Kustomization that `basis-network` (and any other Service-creating
+Kustomization — see "Cross-repo consumers left in base-stack") must
+`dependsOn`, gated by a `healthChecks` entry on the `ClusterPolicy`'s own
+`Ready` condition.
+
+**Failure policy.** The webhook uses `failurePolicy: Ignore`, not `Fail` —
+see the comment in `policy/kyverno-metallb-lb-class.yaml` for why `Fail`
+would make Kyverno's availability a hard gate on *all* Service creation
+cluster-wide, which is a worse failure mode than "a Service is occasionally
+created classless and needs a reconcile/retry."
+
 ## Traefik/metallb are decoupled
 
 There is no `traefik` IPAddressPool and no `HelmChartConfig` pinning k3s's
@@ -174,6 +238,12 @@ base-stack's `1.basis` layer.
 - **cert-manager** controller + CRDs. The `famevans` ClusterIssuer itself now
   lives in basis (`network/famevans-issuer.yaml`); only the operator stays in
   base-stack. The `simplesalt` ClusterIssuer (public domain) also stays.
+- **Kyverno** controller + CRDs (`ClusterPolicy`) and its admission webhook.
+  A second upward dependency of the same kind as cert-manager above: basis's
+  `policy/` only owns the `ClusterPolicy` object
+  (`policy/kyverno-metallb-lb-class.yaml`), same pattern as basis owning the
+  `famevans` `ClusterIssuer` while cert-manager's operator stays in
+  base-stack. See "MetalLB loadBalancerClass policy" above.
 - Nothing traefik-related — see "Traefik/metallb are decoupled" above.
 
 `network/` no longer hardcodes any address. Every IP — the DNS/DHCP VIP, the
@@ -230,7 +300,12 @@ These base-stack resources reference basis-owned objects by name/annotation
 (soft; they just need basis reconciled):
 
 - `3.infra/local-fs.yaml` — the `fs` SMB LoadBalancer consumes the basis
-  `fe-apps` pool (stays `Pending` if basis isn't applied).
+  `fe-apps` pool (stays `Pending` if basis isn't applied). Since
+  dylannevans/basis#12, its Kustomization also needs a `dependsOn` on
+  `basis-policy` (see "MetalLB loadBalancerClass policy" above) — otherwise,
+  on a fresh cluster, `fs` can be created before the Kyverno policy is
+  admitted and end up classless, silently unpicked-up by a class-scoped
+  MetalLB.
 - `3.infra/mcp-k8s.yaml` (`famevans-tls-svcs`) — references the basis
   `famevans` ClusterIssuer; LAN-only/disposable (not in any CF tunnel).
 

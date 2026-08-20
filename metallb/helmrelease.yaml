@@ -21,6 +21,19 @@ spec:
         namespace: flux-system
   interval: 5m
   values:
+    # Matches the class injected by policy/kyverno-metallb-lb-class.yaml.
+    # Verified against the metallb chart source (charts/metallb/values.yaml
+    # top-level `loadBalancerClass: ""` key, consumed in
+    # charts/metallb/templates/controller.yaml as `--lb-class={{
+    # .Values.loadBalancerClass }}` on the controller container) rather than
+    # assumed from the issue text -- see README.md "MetalLB loadBalancerClass
+    # policy" for how.
+    #
+    # Once this is non-empty, MetalLB's service_controller ignores every
+    # Service that doesn't carry this exact class, including classless ones
+    # -- see policy/kyverno-metallb-lb-class.yaml for why that's covered by a
+    # cluster-wide mutating policy rather than left as a per-repo convention.
+    loadBalancerClass: metallb.universe.tf/metallb
     prometheus:
       serviceMonitor:
         enabled: false

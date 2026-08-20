@@ -1,0 +1,107 @@
+# Kyverno mutating ClusterPolicy: default every `type: LoadBalancer` Service
+# onto MetalLB's loadBalancerClass unless it already opts into something else.
+#
+# UPWARD DEPENDENCY, same shape as cert-manager (see README.md "Dependencies
+# that remain in base-stack"): Kyverno itself is NOT installed by basis. It
+# comes from base-stack's `1.basis` layer. This policy is therefore basis's
+# SECOND soft/hard dependency on base-stack reconciling first — without
+# Kyverno's CRDs + admission webhook already Ready, this manifest either
+# fails to apply (CRD missing) or applies inert (webhook not serving yet).
+# See README.md "MetalLB loadBalancerClass policy" for the full writeup.
+#
+# WHY THIS EXISTS: once metallb/helmrelease.yaml sets `loadBalancerClass:
+# metallb.universe.tf/metallb` (--lb-class on the controller), MetalLB's
+# service_controller filters by that exact class and ignores every Service
+# that doesn't carry it -- including classless Services, not just ones with a
+# *different* class. That makes loadBalancerClass an all-or-nothing,
+# cluster-wide contract the moment MetalLB adopts a class. This policy turns
+# that contract into something the cluster enforces automatically instead of
+# a convention every consuming repo (base-stack, this repo, anything else)
+# has to remember by hand.
+#
+# CREATE-ONLY, ON PURPOSE: spec.loadBalancerClass is immutable once a Service
+# exists (the API server rejects any attempt to set it on an existing
+# object), so a mutate rule literally cannot fix already-created Services --
+# there is nothing to "patch" that the API server will accept. Existing
+# LoadBalancer Services (k1's `dns` and `pihole-web`, both in network/dns.yaml)
+# have to be deleted and recreated to pick this up. That is a real, brief LAN
+# DNS/DHCP outage -- see README.md for the sequenced migration procedure. Do
+# not add UPDATE to `operations` below expecting it to help; it won't, and it
+# adds webhook load for no benefit.
+#
+# background: false, for the same reason: Kyverno's background scanner can
+# only report on non-compliant existing resources, or mutate them via
+# mutateExistingOnPolicyUpdate -- and the latter would hit the exact same
+# immutable-field rejection CREATE-only mutate avoids. There's nothing useful
+# for a background pass to do here.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: metallb-default-loadbalancerclass
+  labels:
+    app.kubernetes.io/name: metallb-default-loadbalancerclass
+    app.kubernetes.io/part-of: basis
+    app.kubernetes.io/component: policy
+    entity: cluster
+    capability: basis
+  annotations:
+    policies.kyverno.io/title: Default MetalLB loadBalancerClass
+    policies.kyverno.io/category: MetalLB
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Service
+    policies.kyverno.io/description: >-
+      Injects spec.loadBalancerClass=metallb.universe.tf/metallb on CREATE for
+      every type:LoadBalancer Service that doesn't already declare a class, so
+      MetalLB's --lb-class filtering (set in metallb/helmrelease.yaml) doesn't
+      silently strand Services that never opted in. Escape hatch: set
+      spec.loadBalancerClass yourself, or label the Service
+      basis/skip-lb-class: "true", to keep it off MetalLB entirely.
+spec:
+  background: false
+  # failurePolicy: Ignore, not Fail. Fail would make this webhook a hard
+  # dependency of *every* Service create in the cluster -- if Kyverno is
+  # briefly unavailable (upgrade, restart, the base-stack 1.basis layer not
+  # yet reconciled on a fresh cluster), Fail would block all Service creation
+  # cluster-wide. Ignore degrades to exactly today's behaviour: the Service
+  # is created classless, which is a no-op for anything that isn't a
+  # LoadBalancer, and for LoadBalancer Services just means "not yet adopted
+  # by MetalLB" -- recoverable by any retry/reconcile once Kyverno is back,
+  # not a stuck admission failure.
+  webhookConfiguration:
+    failurePolicy: Ignore
+    timeoutSeconds: 10
+  rules:
+    - name: set-metallb-loadbalancerclass
+      match:
+        any:
+          - resources:
+              kinds:
+                - Service
+              operations:
+                - CREATE
+      preconditions:
+        all:
+          # Only Services actually requesting a LoadBalancer.
+          - key: "{{ request.object.spec.type }}"
+            operator: Equals
+            value: LoadBalancer
+          # Escape hatch #1: already set (any class, including MetalLB's own)
+          # -- the policy is a default, not an override, so it never clobbers
+          # a value the manifest already carries.
+          - key: "{{ request.object.spec.loadBalancerClass || '' }}"
+            operator: Equals
+            value: ""
+      exclude:
+        any:
+          # Escape hatch #2: an explicit opt-out label for Services that
+          # intentionally want to stay classless (e.g. targeting klipper, or
+          # some other controller that only honors class-less Services) even
+          # though they set type: LoadBalancer.
+          - resources:
+              selector:
+                matchLabels:
+                  basis/skip-lb-class: "true"
+      mutate:
+        patchStrategicMerge:
+          spec:
+            loadBalancerClass: metallb.universe.tf/metallb
