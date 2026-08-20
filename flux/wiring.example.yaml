@@ -67,3 +67,48 @@ spec:
         # committed default. To point basis at a different LAN, override it —
         # e.g. a Kustomize patch on vars.yaml in the consuming repo, or a
         # ConfigMap generator layered after this Kustomization's path.
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: basis-cloud
+  namespace: flux-system
+spec:
+  interval: 1m
+  path: ./cloud
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: basis
+  timeout: 5m
+  # CROSS-REPO DEPENDENCY (not expressible here): cloud/ needs the crossplane
+  # Cloudflare zero-trust provider + ProviderConfig `default`, both installed
+  # by base-stack's `access` layer — wire a dependsOn on that Kustomization's
+  # name in base-stack's own order.yaml, the same handoff basis-network does
+  # for metallb. basis does NOT install the provider.
+  #
+  # No dependsOn on basis-metallb/basis-network here: cloud/ (personal
+  # evans-home Cloudflare account) and network/ (LAN metallb+DNS) are
+  # independent layers, so basis-cloud uses its own vars ConfigMap
+  # (basis-cloud-vars, below) instead of basis-vars — reusing basis-vars
+  # would force an artificial ordering dependency on basis-network purely so
+  # the ConfigMap exists, which is the coupling this repo's layering is meant
+  # to avoid. See README "Cluster-independence".
+  postBuild:
+    substituteFrom:
+      - kind: ConfigMap
+        name: basis-cloud-vars
+        # basis ships cloud/vars.yaml with CF_ACCESS_TEAM:
+        # evans-home.cloudflareaccess.com and CF_ACCOUNT_ID:
+        # ed503c805407090970caf579da8193a8 as committed defaults — the live
+        # evans-home account, so an unchanged apply is byte-identical to the
+        # previously-hardcoded manifests. Override in the consuming repo to
+        # point basis-cloud at a different Cloudflare account.
+        #
+        # Deliberately NOT templated: the crossplane.io/external-name
+        # annotations and other UUIDs in cloud/10-access/cf-access-famevans.yaml
+        # that adopt specific LIVE Cloudflare objects. Those identify the
+        # exact adopted resource — if substitution were ever misconfigured, a
+        # templated identity value risks crossplane re-pointing or failing to
+        # adopt the live object, unlike accountId/team-domain which are plain
+        # data fields. See the comment in that file for the full rationale.

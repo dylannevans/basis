@@ -10,6 +10,19 @@
 #
 # What stays in base-stack: the SS SSO IdP (@simplesalt.company) and the App
 # Launcher — those are simplesalt, not famevans.
+#
+# TEMPLATING (basis-cloud Kustomization, see flux/wiring.example.yaml):
+# accountId and the team domain below are substituted from the
+# basis-cloud-vars ConfigMap (cloud/vars.yaml) via postBuild.substituteFrom —
+# ${CF_ACCOUNT_ID} / ${CF_ACCESS_TEAM}, committed defaults equal to the
+# previous hardcoded evans-home values, so this is byte-identical until
+# someone overrides the ConfigMap. The three UUIDs below (external-name,
+# allowedIdps famevans IdP, policy id) are deliberately left hardcoded, NOT
+# templated: they are crossplane.io/external-name-class identifiers that
+# adopt a specific LIVE Cloudflare object. If postBuild substitution were
+# ever misconfigured, a templated identity UUID could make crossplane
+# re-point or fail to adopt the live resource — accountId/domain are plain
+# data fields with no such adoption risk, so only those are templated here.
 ---
 # Warp Login App — personal WARP VPN, gated by the famevans Google IdP.
 # LIVE + adopted (crossplane.io/external-name = the existing CF app UUID), so:
@@ -31,10 +44,10 @@ metadata:
 spec:
   deletionPolicy: Orphan
   forProvider:
-    accountId: ed503c805407090970caf579da8193a8
+    accountId: ${CF_ACCOUNT_ID}
     name: Warp Login App
     type: warp
-    domain: evans-home.cloudflareaccess.com/warp
+    domain: ${CF_ACCESS_TEAM}/warp
     sessionDuration: 24h
     autoRedirectToIdentity: true
     allowedIdps:
