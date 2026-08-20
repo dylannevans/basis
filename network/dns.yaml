@@ -87,6 +87,43 @@ spec:
       FTLCONF_dhcp_netmask: "${LAN_NETMASK:=255.255.255.0}"
       FTLCONF_dhcp_leasetime: "24"
       FTLCONF_dns_domain: lan
+      # Required by hostNetwork, and the reason this PR is safe to merge.
+      #
+      # FTL binds the WILDCARD address by default (the chart ships
+      # extraEnvVars.FTLCONF_dns_listeningMode: 'all'). In a pod netns that is
+      # free. On the host it is not: systemd-resolved's stub holds
+      # 127.0.0.53:53, and while a wildcard UDP bind survives that (both
+      # sockets set SO_REUSEADDR, which for UDP permits overlapping addresses),
+      # a wildcard TCP bind does not — SO_REUSEADDR only relaxes TIME_WAIT for
+      # TCP, never two live listeners on overlapping addr:port. A failed
+      # listening socket is fatal to dnsmasq, so FTL would CrashLoop and take
+      # the LAN's DNS and DHCP with it. Measured on k1:
+      #
+      #   UDP 0.0.0.0:53  SO_REUSEADDR=1 -> BIND OK
+      #   TCP 0.0.0.0:53  SO_REUSEADDR=1 -> FAILED [Errno 98] Address already in use
+      #   TCP 192.168.1.9:53 (node IP)   -> BIND OK
+      #   TCP 127.0.0.1:53               -> BIND OK
+      #
+      # BIND makes FTL emit `interface=<iface>` + `bind-interfaces`, so it
+      # binds that interface's address instead of the wildcard and never
+      # contends with the stub. 127.0.0.53 is not an interface address (lo
+      # carries only 127.0.0.1), so per-address binding cannot collide with it.
+      #
+      # The interface is left to FTL's auto-detection (dns.interface defaults
+      # to "" -> the default-route interface), so this does not hardcode eth0
+      # and stays correct on a node that names its NIC differently.
+      #
+      # This does NOT need to bind the MetalLB VIP, and could not: 192.168.1.2
+      # is not on any interface (`bind: Cannot assign requested address`) —
+      # MetalLB L2 answers ARP and lets kube-proxy DNAT to the Service
+      # endpoint, which under hostNetwork is the node's own address:53.
+      #
+      # Alternative if the node's address ever churns, or if the arrival-
+      # interface check matters: listeningMode NONE plus `bind-dynamic` in
+      # dnsmasq.customSettings. dnsmasq itself prefers bind-dynamic, but NONE
+      # is documented as advanced-use-only and this repo would then own the
+      # listening config outright.
+      FTLCONF_dns_listeningMode: BIND
       FTLCONF_webserver_port: 80,[::]:80
       FTLCONF_dhcp_ipv6: "true"
       # Pinned explicitly (dylannevans/basis#11) rather than left to the
