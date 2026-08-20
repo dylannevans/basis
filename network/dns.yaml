@@ -54,6 +54,15 @@ spec:
       FTLCONF_dns_domain: lan
       FTLCONF_webserver_port: 80,[::]:80
       FTLCONF_dhcp_ipv6: "true"
+      # Pinned explicitly (dylannevans/basis#11) rather than left to the
+      # mojo2600 pihole chart's default (charts/pihole/values.yaml DNS1/DNS2),
+      # which happens to already be this value. This must NEVER be
+      # 192.168.1.2 (dns-pool, this pod's own Service IP) or anything else
+      # the cluster serves: pihole forwarding to itself would recreate the
+      # self-referential resolver loop in #9, just one level down the stack
+      # from where #9 actually bites (the node's resolver, not pihole's
+      # upstream). Keep this a static public resolver.
+      FTLCONF_dns_upstreams: 8.8.8.8;8.8.4.4
     privileged: "true"
     # The UI gets its own metallb LoadBalancer IP (shares dns-pool's single
     # address with the manual DNS/DHCP Service below) and terminates TLS
